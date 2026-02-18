@@ -39,6 +39,7 @@ function loadPageData(page) {
   switch (page) {
     case 'dashboard': loadDashboard(); break;
     case 'routing': loadRouting(); break;
+    case 'launcher': loadLauncher(); break;
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
     case 'player': loadPlayer(); break;
@@ -651,6 +652,264 @@ async function refreshLogs() {
 async function clearLogs() {
   await api('/logs/clear', { method: 'POST' });
   document.getElementById('log-viewer').innerHTML = '';
+}
+
+// --- Clip Launcher ---
+
+let launcherInterval = null;
+let launcherData = null;
+let pendingClipAssign = null; // {layerId, slot}
+
+async function loadLauncher() {
+  const data = await api('/launcher');
+  launcherData = data;
+
+  // Update clock controls
+  updateClockControls(data.clock);
+
+  // Render layer grid
+  renderLauncherGrid(data.layers, data.files);
+
+  // Start polling
+  if (launcherInterval) clearInterval(launcherInterval);
+  launcherInterval = setInterval(pollLauncher, 200);
+}
+
+async function pollLauncher() {
+  if (currentPage !== 'launcher') {
+    clearInterval(launcherInterval);
+    launcherInterval = null;
+    return;
+  }
+  const poll = await api('/launcher/poll');
+  updateBeatDisplay(poll);
+  updateClipStates(poll.layers);
+}
+
+function updateClockControls(clock) {
+  document.getElementById('launcher-bpm').value = clock.bpm;
+  document.getElementById('launcher-quantum').value = clock.quantum;
+  document.getElementById('launcher-timesig').value = clock.beats_per_bar;
+
+  document.getElementById('clock-int').classList.toggle('active', clock.mode === 'internal');
+  document.getElementById('clock-ext').classList.toggle('active', clock.mode === 'external');
+}
+
+function updateBeatDisplay(poll) {
+  const barEl = document.querySelector('.beat-bar');
+  if (barEl) barEl.textContent = `BAR ${poll.bar + 1}`;
+
+  const dots = document.querySelectorAll('#beat-dots .beat-dot');
+  dots.forEach((dot, i) => {
+    dot.classList.toggle('active', poll.running && i === poll.beat);
+  });
+
+  // Update transport button states
+  document.getElementById('transport-start').disabled = poll.running;
+  document.getElementById('transport-stop').disabled = !poll.running;
+}
+
+function updateClipStates(layerPolls) {
+  if (!layerPolls) return;
+  layerPolls.forEach(lp => {
+    lp.clip_states.forEach((state, slot) => {
+      const el = document.getElementById(`clip-${lp.id}-${slot}`);
+      if (!el) return;
+      // Remove all state classes
+      el.classList.remove('clip-playing', 'clip-queued', 'clip-stopping', 'clip-stopped', 'clip-empty');
+      el.classList.add('clip-' + state);
+    });
+  });
+}
+
+function renderLauncherGrid(layers, files) {
+  const grid = document.getElementById('launcher-grid');
+  if (!layers || layers.length === 0) {
+    grid.innerHTML = '<div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">No layers yet. Click "+ Add Layer" to create one.</div>';
+    return;
+  }
+
+  grid.innerHTML = layers.map(layer => {
+    const clips = layer.clips.map(c => {
+      const stateClass = 'clip-' + c.state;
+      const label = c.state === 'empty'
+        ? '+'
+        : (c.name || c.filename || '?');
+      const onclick = c.state === 'empty'
+        ? `onclick="openClipAssignModal(${layer.id}, ${c.slot})"`
+        : `onclick="launchClip(${layer.id}, ${c.slot})"`;
+      const removeBtn = c.state !== 'empty'
+        ? `<span class="clip-remove" onclick="event.stopPropagation(); removeClip(${layer.id}, ${c.slot})">&times;</span>`
+        : '';
+      return `<div id="clip-${layer.id}-${c.slot}" class="clip-slot ${stateClass}" ${onclick}>
+        <span class="clip-label">${esc(label)}</span>
+        ${removeBtn}
+      </div>`;
+    }).join('');
+
+    const chLabel = layer.midi_channel ? `ch ${layer.midi_channel}` : 'all ch';
+
+    return `
+      <div class="card layer-row" style="margin-top:8px;">
+        <div class="layer-header">
+          <div class="layer-name">${esc(layer.name || 'Layer ' + layer.id)}</div>
+          <div class="layer-dest">&rarr; ${esc(layer.destination)}</div>
+          <div class="layer-ch">${chLabel}</div>
+          <button class="btn btn-sm" onclick="stopLayerBtn(${layer.id})">Stop</button>
+          <button class="btn btn-sm btn-danger" onclick="removeLayer(${layer.id})">Remove</button>
+        </div>
+        <div class="clip-row">${clips}</div>
+      </div>`;
+  }).join('');
+}
+
+// Clock controls
+async function setClockMode(mode) {
+  await api('/launcher/clock', { method: 'POST', body: { mode } });
+  document.getElementById('clock-int').classList.toggle('active', mode === 'internal');
+  document.getElementById('clock-ext').classList.toggle('active', mode === 'external');
+}
+
+async function adjustBpm(delta) {
+  const input = document.getElementById('launcher-bpm');
+  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
+  input.value = bpm;
+  await api('/launcher/clock', { method: 'POST', body: { bpm } });
+}
+
+async function setBpm(val) {
+  await api('/launcher/clock', { method: 'POST', body: { bpm: parseFloat(val) } });
+}
+
+async function setQuantum(val) {
+  await api('/launcher/clock', { method: 'POST', body: { quantum: val } });
+}
+
+async function setTimeSig(val) {
+  await api('/launcher/clock', { method: 'POST', body: { beats_per_bar: parseInt(val) } });
+  // Update beat dots
+  const dots = document.getElementById('beat-dots');
+  if (dots) {
+    dots.innerHTML = Array.from({length: parseInt(val)}, () => '<span class="beat-dot"></span>').join('');
+  }
+}
+
+async function transportStart() {
+  await api('/launcher/transport/start', { method: 'POST' });
+}
+
+async function transportStop() {
+  await api('/launcher/transport/stop', { method: 'POST' });
+}
+
+// Clip actions
+async function launchClip(layerId, slot) {
+  await api(`/launcher/layers/${layerId}/clips/${slot}/launch`, { method: 'POST' });
+}
+
+async function removeClip(layerId, slot) {
+  await api(`/launcher/layers/${layerId}/clips/${slot}`, { method: 'DELETE' });
+  loadLauncher();
+}
+
+async function stopLayerBtn(layerId) {
+  await api(`/launcher/layers/${layerId}/stop`, { method: 'POST' });
+}
+
+async function removeLayer(layerId) {
+  if (!confirm('Remove this layer?')) return;
+  await api(`/launcher/layers/${layerId}`, { method: 'DELETE' });
+  loadLauncher();
+}
+
+async function launcherStopAll() {
+  await api('/launcher/stop_all', { method: 'POST' });
+}
+
+// Clip assign modal
+function openClipAssignModal(layerId, slot) {
+  pendingClipAssign = { layerId, slot };
+  const layer = launcherData?.layers?.find(l => l.id === layerId);
+  document.getElementById('clip-assign-info').textContent =
+    `Layer: ${layer?.name || layerId} — Slot ${slot + 1}`;
+
+  const fileSelect = document.getElementById('clip-assign-file');
+  const files = launcherData?.files || [];
+  fileSelect.innerHTML = files.length === 0
+    ? '<option value="">No MIDI files — upload one first</option>'
+    : files.map(f => `<option value="${esc(f.name)}">${esc(f.name)} (${f.duration}s)</option>`).join('');
+
+  document.getElementById('clip-assign-name').value = '';
+  document.getElementById('clip-assign-loop').checked = true;
+  document.getElementById('clip-assign-modal').classList.add('active');
+}
+
+function closeClipAssignModal() {
+  document.getElementById('clip-assign-modal').classList.remove('active');
+  pendingClipAssign = null;
+}
+
+async function confirmClipAssign() {
+  if (!pendingClipAssign) return;
+  const { layerId, slot } = pendingClipAssign;
+  const filename = document.getElementById('clip-assign-file').value;
+  if (!filename) return;
+
+  const name = document.getElementById('clip-assign-name').value;
+  const loop = document.getElementById('clip-assign-loop').checked;
+
+  await api(`/launcher/layers/${layerId}/clips/${slot}`, {
+    method: 'POST',
+    body: { filename, name, loop },
+  });
+
+  closeClipAssignModal();
+  loadLauncher();
+}
+
+// Add layer modal
+async function addLayerModal() {
+  const devData = await api('/devices');
+  const outputDevices = devData.devices.filter(d => d.direction === 'both' || d.direction === 'out');
+
+  const destSelect = document.getElementById('layer-add-dest');
+  destSelect.innerHTML = outputDevices.map(d =>
+    `<option value="${esc(d.name)}">${esc(d.name)}</option>`
+  ).join('');
+
+  document.getElementById('layer-add-name').value = '';
+  document.getElementById('layer-add-ch').value = 0;
+  document.getElementById('add-layer-modal').classList.add('active');
+}
+
+function closeAddLayerModal() {
+  document.getElementById('add-layer-modal').classList.remove('active');
+}
+
+async function confirmAddLayer() {
+  const name = document.getElementById('layer-add-name').value;
+  const destination = document.getElementById('layer-add-dest').value;
+  const midi_channel = parseInt(document.getElementById('layer-add-ch').value) || 0;
+
+  if (!destination) return;
+
+  await api('/launcher/layers', {
+    method: 'POST',
+    body: { name: name || destination, destination, midi_channel },
+  });
+
+  closeAddLayerModal();
+  loadLauncher();
+}
+
+async function uploadLauncherFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  await fetch('/api/launcher/upload', { method: 'POST', body: formData });
+  input.value = '';
+  loadLauncher();
 }
 
 // --- MIDI Player ---

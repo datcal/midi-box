@@ -64,6 +64,7 @@ class MidiRouter:
         self._send_callback = None  # Function to actually send MIDI
         self._activity: dict[str, PortActivity] = {}
         self._clock_source: str | None = None
+        self._clock_callback = None  # fn(mido.Message) for clip launcher
         self._running = False
 
     def set_send_callback(self, callback):
@@ -129,6 +130,9 @@ class MidiRouter:
         if message.type in ("clock", "start", "stop", "continue", "songpos"):
             if self._clock_source and source_name != self._clock_source:
                 return
+            # Forward to clip launcher for external clock sync
+            if self._clock_callback and message.type in ("clock", "start", "stop", "continue"):
+                self._clock_callback(message)
 
         # Find matching routes
         with self._lock:

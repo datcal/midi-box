@@ -339,6 +339,120 @@ def create_app(midi_box_instance):
         return jsonify({"ok": True, "devices": devices})
 
     # ---------------------------------------------------------------
+    # API: Clip Launcher
+    # ---------------------------------------------------------------
+
+    @app.route("/api/launcher")
+    def api_launcher_status():
+        status = _midi_box.launcher.get_status()
+        status["files"] = _midi_box.launcher.list_files()
+        return jsonify(status)
+
+    @app.route("/api/launcher/poll")
+    def api_launcher_poll():
+        return jsonify(_midi_box.launcher.get_poll())
+
+    @app.route("/api/launcher/clock", methods=["POST"])
+    def api_launcher_clock():
+        data = request.json
+        if "mode" in data:
+            _midi_box.launcher.set_clock_mode(data["mode"])
+        if "bpm" in data:
+            _midi_box.launcher.set_bpm(float(data["bpm"]))
+        if "quantum" in data:
+            _midi_box.launcher.set_quantum(data["quantum"])
+        if "beats_per_bar" in data:
+            _midi_box.launcher.set_beats_per_bar(int(data["beats_per_bar"]))
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/transport/start", methods=["POST"])
+    def api_launcher_start():
+        _midi_box.launcher.transport_start()
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/transport/stop", methods=["POST"])
+    def api_launcher_stop_transport():
+        _midi_box.launcher.transport_stop()
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/layers", methods=["POST"])
+    def api_launcher_add_layer():
+        data = request.json
+        layer = _midi_box.launcher.add_layer(
+            name=data.get("name", ""),
+            destination=data.get("destination", ""),
+            midi_channel=data.get("midi_channel"),
+        )
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": True, "layer_id": layer.layer_id})
+
+    @app.route("/api/launcher/layers/<int:layer_id>", methods=["DELETE"])
+    def api_launcher_remove_layer(layer_id):
+        ok = _midi_box.launcher.remove_layer(layer_id)
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": ok})
+
+    @app.route("/api/launcher/layers/<int:layer_id>", methods=["PATCH"])
+    def api_launcher_update_layer(layer_id):
+        data = request.json
+        _midi_box.launcher.update_layer(
+            layer_id,
+            name=data.get("name"),
+            destination=data.get("destination"),
+            midi_channel=data.get("midi_channel"),
+        )
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>", methods=["POST"])
+    def api_launcher_assign_clip(layer_id, slot):
+        data = request.json
+        ok = _midi_box.launcher.assign_clip(
+            layer_id, slot,
+            filename=data.get("filename", ""),
+            name=data.get("name", ""),
+            loop=data.get("loop", True),
+        )
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": ok})
+
+    @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>", methods=["DELETE"])
+    def api_launcher_remove_clip(layer_id, slot):
+        ok = _midi_box.launcher.remove_clip(layer_id, slot)
+        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
+        return jsonify({"ok": ok})
+
+    @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>/launch", methods=["POST"])
+    def api_launcher_launch_clip(layer_id, slot):
+        _midi_box.launcher.launch_clip(layer_id, slot)
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/layers/<int:layer_id>/stop", methods=["POST"])
+    def api_launcher_stop_layer(layer_id):
+        _midi_box.launcher.stop_layer(layer_id)
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/stop_all", methods=["POST"])
+    def api_launcher_stop_all():
+        _midi_box.launcher.stop_all()
+        return jsonify({"ok": True})
+
+    @app.route("/api/launcher/upload", methods=["POST"])
+    def api_launcher_upload():
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return jsonify({"ok": False, "error": "No file"}), 400
+        ok = _midi_box.launcher.upload(file.filename, file.read())
+        return jsonify({"ok": ok})
+
+    @app.route("/api/launcher/files/delete", methods=["POST"])
+    def api_launcher_delete_file():
+        data = request.json
+        ok = _midi_box.launcher.delete_file(data.get("file", ""))
+        return jsonify({"ok": ok})
+
+    # ---------------------------------------------------------------
     # API: MIDI Player
     # ---------------------------------------------------------------
 

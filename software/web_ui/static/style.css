@@ -510,6 +510,224 @@ body {
 
 /* --- MIDI Monitor --- */
 
+/* --- Clip Launcher --- */
+
+.clock-bar {
+  padding: 12px 16px;
+}
+
+.clock-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.clock-mode {
+  display: flex;
+  gap: 2px;
+}
+
+.clock-mode .tab-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.clock-bpm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.clock-bpm input {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.clock-quantum select,
+.clock-timesig select {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.beat-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+.beat-bar {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 60px;
+}
+
+.beat-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.beat-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.beat-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.clock-transport {
+  display: flex;
+  gap: 6px;
+}
+
+/* Layer rows */
+.layer-row {
+  padding: 12px 16px;
+}
+
+.layer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.layer-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+  min-width: 80px;
+}
+
+.layer-dest {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.layer-ch {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+/* Clip grid */
+.clip-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.clip-slot {
+  min-width: 80px;
+  height: 56px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  position: relative;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.clip-slot .clip-label {
+  text-align: center;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.clip-slot .clip-remove {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.clip-slot:hover .clip-remove {
+  opacity: 1;
+}
+
+/* Clip states */
+.clip-empty {
+  background: transparent;
+  border: 2px dashed var(--border);
+  color: var(--text-muted);
+}
+
+.clip-empty:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.clip-stopped {
+  background: var(--bg-hover);
+  border: 2px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.clip-stopped:hover {
+  border-color: var(--accent);
+}
+
+.clip-queued {
+  background: rgba(243, 156, 18, 0.2);
+  border: 2px solid var(--warning);
+  color: var(--warning);
+  animation: clip-pulse 0.8s ease-in-out infinite;
+}
+
+.clip-playing {
+  background: rgba(15, 155, 142, 0.25);
+  border: 2px solid var(--accent);
+  color: var(--accent-hover);
+  box-shadow: 0 0 8px rgba(15, 155, 142, 0.3);
+}
+
+.clip-stopping {
+  background: rgba(231, 76, 60, 0.15);
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  opacity: 0.7;
+}
+
+@keyframes clip-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* --- Player --- */
 
 .player-file-row {

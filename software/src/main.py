@@ -20,6 +20,7 @@ from router import MidiRouter
 from preset_manager import PresetManager
 from midi_logger import MidiLogger
 from midi_player import MidiPlayer
+from clip_launcher import ClipLauncher
 from state import StateManager
 from ui_web import create_app, LogBuffer
 
@@ -70,6 +71,7 @@ class MidiBox:
         self.state = StateManager()
         self.midi_logger = MidiLogger(max_entries=500)
         self.player = MidiPlayer()
+        self.launcher = ClipLauncher()
         self.log_buffer = LogBuffer()
         self.mode = "standalone"
         self.wifi_config = self._load_wifi_config()
@@ -96,9 +98,12 @@ class MidiBox:
         self.mode = self._detect_mode()
         logger.info(f"Mode: {self.mode.upper()}")
 
-        # Register the send callback
+        # Register callbacks
         self.router.set_send_callback(self._send_midi)
         self.player._send_callback = self._send_midi
+        self.launcher._send_callback = self._send_midi
+        self.launcher._output_devices_callback = self._get_output_device_names
+        self.router._clock_callback = self.launcher.on_clock_message
 
         # Open MIDI devices (real or mock)
         if self.args.mock:
@@ -115,6 +120,9 @@ class MidiBox:
         # Restore routes from saved state, or fall back to preset
         self._restore_state()
 
+        # Initialize clip launcher (restore state or auto-create layers)
+        self._init_launcher()
+
         # Start hotplug monitor for USB devices (skip in mock mode)
         if not self.args.mock:
             self.alsa.start_hotplug_monitor()
@@ -130,6 +138,9 @@ class MidiBox:
         print(self.router.status())
         print()
 
+        # Start clip launcher clock
+        self.launcher.start()
+
         # Start web UI
         self._start_web_ui()
 
@@ -142,6 +153,7 @@ class MidiBox:
     def stop(self):
         logger.info("Shutting down...")
         self.player.stop()
+        self.launcher.stop()
         self._save_state()
         self._running = False
         self.alsa.close_all()
@@ -279,10 +291,30 @@ class MidiBox:
         self.state.set_routes(self.router.dump_routes())
         self.state.set_clock_source(clock)
 
+    def _init_launcher(self):
+        """Initialize clip launcher — restore saved state or auto-create layers."""
+        saved = self.state.get_launcher_state()
+        if saved and saved.get("layers"):
+            self.launcher.load_state(saved)
+            logger.info(f"Launcher restored: {len(self.launcher.layers)} layers")
+        else:
+            # Auto-create one layer per output device
+            for dev in self.registry.get_output_devices():
+                self.launcher.add_layer(
+                    name=dev.name,
+                    destination=dev.name,
+                )
+            logger.info(f"Launcher: auto-created {len(self.launcher.layers)} layers")
+
+    def _get_output_device_names(self) -> list[str]:
+        """Return list of output device names (for clock output)."""
+        return [d.name for d in self.registry.get_output_devices()]
+
     def _save_state(self):
         """Persist current state to disk."""
         self.state.set_routes(self.router.dump_routes())
         self.state.set_clock_source(self.router._clock_source)
+        self.state.set_launcher_state(self.launcher.save_state())
         logger.info("State saved")
 
     def _start_web_ui(self):

@@ -22,6 +22,7 @@ DEFAULT_STATE = {
     "clock_source": None,
     "routes": [],
     "device_overrides": {},  # {device_name: {direction, device_type, midi_channel}}
+    "launcher": {},  # clip launcher state (layers, clips, clock config)
     "settings": {
         "mode": "standalone",
         "log_level": "INFO",
@@ -107,6 +108,13 @@ class StateManager:
 
     def get_clock_source(self) -> str | None:
         return self.state.get("clock_source")
+
+    def get_launcher_state(self) -> dict:
+        return self.state.get("launcher", {})
+
+    def set_launcher_state(self, data: dict):
+        self.state["launcher"] = data
+        self.save()
 
     def get_device_overrides(self) -> dict:
         return self.state.get("device_overrides", {})

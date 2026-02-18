@@ -22,6 +22,9 @@
       <li><a href="#routing" data-page="routing">
         <span class="nav-icon">&#8644;</span><span>Routing</span>
       </a></li>
+      <li><a href="#launcher" data-page="launcher">
+        <span class="nav-icon">&#9646;&#9646;</span><span>Launcher</span>
+      </a></li>
       <li><a href="#presets" data-page="presets">
         <span class="nav-icon">&#9776;</span><span>Presets</span>
       </a></li>
@@ -109,6 +112,69 @@
           <button class="btn btn-sm btn-danger" onclick="clearAllRoutes()">Clear All</button>
         </div>
         <ul class="route-list" id="route-list"></ul>
+      </div>
+    </div>
+
+    <!-- ============== CLIP LAUNCHER ============== -->
+    <div class="page" id="page-launcher">
+      <div class="page-header">
+        <h2>Clip Launcher</h2>
+        <p>Session view — launch MIDI clips synced to clock</p>
+      </div>
+
+      <!-- Clock Bar -->
+      <div class="card clock-bar">
+        <div class="clock-controls">
+          <div class="clock-mode">
+            <button class="tab-btn active" id="clock-int" onclick="setClockMode('internal')">INT</button>
+            <button class="tab-btn" id="clock-ext" onclick="setClockMode('external')">EXT</button>
+          </div>
+          <div class="clock-bpm">
+            <button class="btn btn-sm" onclick="adjustBpm(-1)">-</button>
+            <input type="number" id="launcher-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="setBpm(this.value)">
+            <button class="btn btn-sm" onclick="adjustBpm(1)">+</button>
+            <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
+          </div>
+          <div class="clock-quantum">
+            <select id="launcher-quantum" onchange="setQuantum(this.value)">
+              <option value="beat">Beat</option>
+              <option value="bar" selected>Bar</option>
+              <option value="2bar">2 Bars</option>
+              <option value="4bar">4 Bars</option>
+            </select>
+          </div>
+          <div class="clock-timesig">
+            <select id="launcher-timesig" onchange="setTimeSig(this.value)">
+              <option value="4" selected>4/4</option>
+              <option value="3">3/4</option>
+              <option value="6">6/8</option>
+            </select>
+          </div>
+          <div class="beat-display" id="beat-display">
+            <span class="beat-bar">BAR 1</span>
+            <span class="beat-dots" id="beat-dots">
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+            </span>
+          </div>
+          <div class="clock-transport">
+            <button class="btn btn-accent" id="transport-start" onclick="transportStart()">START</button>
+            <button class="btn btn-danger" id="transport-stop" onclick="transportStop()">STOP</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Layer Grid -->
+      <div id="launcher-grid"></div>
+
+      <!-- Add Layer -->
+      <div class="card" style="margin-top:8px; text-align:center; padding:16px;">
+        <button class="btn btn-accent" onclick="addLayerModal()">+ Add Layer</button>
+        <button class="btn" style="margin-left:8px;" onclick="document.getElementById('launcher-upload').click()">Upload .mid</button>
+        <input type="file" id="launcher-upload" accept=".mid,.midi" style="display:none" onchange="uploadLauncherFile(this)">
+        <button class="btn btn-danger" style="margin-left:8px;" onclick="launcherStopAll()">Stop All</button>
       </div>
     </div>
 
@@ -336,6 +402,54 @@
     </div>
 
   </main>
+</div>
+
+<!-- Clip Assign Modal -->
+<div class="modal-overlay" id="clip-assign-modal">
+  <div class="modal">
+    <h3>Assign Clip</h3>
+    <div id="clip-assign-info" style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;"></div>
+    <div class="form-row">
+      <label>MIDI File</label>
+      <select id="clip-assign-file"></select>
+    </div>
+    <div class="form-row">
+      <label>Name (optional)</label>
+      <input type="text" id="clip-assign-name" placeholder="e.g. Verse Bass">
+    </div>
+    <div class="form-row">
+      <label style="display:flex; align-items:center; gap:8px;">
+        <input type="checkbox" id="clip-assign-loop" checked> Loop
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeClipAssignModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="confirmClipAssign()">Assign</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Layer Modal -->
+<div class="modal-overlay" id="add-layer-modal">
+  <div class="modal">
+    <h3>Add Layer</h3>
+    <div class="form-row">
+      <label>Layer Name</label>
+      <input type="text" id="layer-add-name" placeholder="e.g. Bass">
+    </div>
+    <div class="form-row">
+      <label>Destination Device</label>
+      <select id="layer-add-dest"></select>
+    </div>
+    <div class="form-row">
+      <label>MIDI Channel Override (0 = use file's channels)</label>
+      <input type="number" id="layer-add-ch" min="0" max="16" value="0">
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeAddLayerModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="confirmAddLayer()">Add</button>
+    </div>
+  </div>
 </div>
 
 <!-- Device Config Modal -->
