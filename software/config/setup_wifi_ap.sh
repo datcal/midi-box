@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# MIDI Box — WiFi Access Point Setup (Dual-Interface)
+# MIDI Box — WiFi Access Point Setup (Dual-Interface, NetworkManager-aware)
 # =============================================================================
 # Creates a virtual AP interface (uap0) on top of wlan0 so the Pi can
 # simultaneously:
 #   - Connect to home WiFi via wlan0  (SSH / internet access)
 #   - Broadcast MIDI-BOX hotspot via uap0  (standalone / web UI)
+#
+# Designed for Raspberry Pi OS Bookworm (NetworkManager default).
+# Does NOT touch dhcpcd.conf — IP is assigned directly in the systemd service.
 #
 # Usage:
 #   sudo bash config/setup_wifi_ap.sh
@@ -14,7 +17,7 @@
 
 set -e
 
-AP_IFACE="uap0"          # virtual interface — wlan0 stays as home WiFi client
+AP_IFACE="uap0"
 AP_SSID="MIDI-BOX"
 AP_PASS="midibox123"
 AP_IP="192.168.4.1"
@@ -47,20 +50,35 @@ apt-get install -y hostapd dnsmasq
 
 systemctl stop hostapd dnsmasq 2>/dev/null || true
 
-# --- Systemd service: create uap0 on every boot ---
-echo "[2/6] Installing uap0 interface service..."
+# --- Tell NetworkManager to leave uap0 alone ---
+echo "[2/6] Configuring NetworkManager to ignore $AP_IFACE..."
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/midi-box-ap.conf << EOF
+# MIDI Box — keep NetworkManager away from the virtual AP interface
+[keyfile]
+unmanaged-devices=interface-name:${AP_IFACE}
+EOF
+systemctl reload NetworkManager 2>/dev/null || true
+
+# --- Systemd service: create uap0 and assign static IP on every boot ---
+echo "[3/6] Installing uap0 interface service..."
 cat > /etc/systemd/system/midi-box-ap-iface.service << EOF
 [Unit]
 Description=MIDI Box — Create virtual AP interface (uap0)
-Before=hostapd.service dhcpcd.service
-After=sys-subsystem-net-devices-wlan0.device
+Before=hostapd.service dnsmasq.service
+After=sys-subsystem-net-devices-wlan0.device network.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/sbin/iw dev wlan0 interface add uap0 type __ap
-ExecStop=/sbin/iw dev uap0 del
-ExecStopPost=/bin/true
+# Create the virtual AP interface
+ExecStart=/sbin/iw dev wlan0 interface add ${AP_IFACE} type __ap
+# Bring it up and assign the static IP
+ExecStartPost=/sbin/ip link set ${AP_IFACE} up
+ExecStartPost=/sbin/ip addr add ${AP_IP}/24 dev ${AP_IFACE}
+# Teardown
+ExecStop=/sbin/ip link set ${AP_IFACE} down
+ExecStop=/sbin/iw dev ${AP_IFACE} del
 
 [Install]
 WantedBy=multi-user.target
@@ -69,27 +87,13 @@ EOF
 systemctl daemon-reload
 systemctl enable midi-box-ap-iface.service
 
-# --- Clean up old wlan0 static IP block if present, add uap0 block ---
-echo "[3/6] Configuring static IP on $AP_IFACE..."
-# Remove any previous MIDI Box block (wlan0 or uap0)
-if grep -q "# MIDI Box WiFi AP" /etc/dhcpcd.conf 2>/dev/null; then
-  # Strip the old block out (from the comment line through the next blank line)
-  sed -i '/# MIDI Box WiFi AP/,/^$/d' /etc/dhcpcd.conf
-fi
-cat >> /etc/dhcpcd.conf << EOF
-
-# MIDI Box WiFi AP
-interface ${AP_IFACE}
-  static ip_address=${AP_IP}/24
-  nohook wpa_supplicant
-EOF
-
 # --- dnsmasq: DHCP for AP clients ---
 echo "[4/6] Configuring dnsmasq..."
 mv /etc/dnsmasq.conf /etc/dnsmasq.conf.bak 2>/dev/null || true
 cat > /etc/dnsmasq.conf << EOF
 # MIDI Box dnsmasq config
 interface=${AP_IFACE}
+bind-interfaces
 dhcp-range=${DHCP_START},${DHCP_END},${NETMASK},24h
 domain=local
 address=/midi-box.local/${AP_IP}
@@ -114,7 +118,7 @@ wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 EOF
 
-# Point hostapd to config
+# Point hostapd to config file
 if grep -q '#DAEMON_CONF=""' /etc/default/hostapd 2>/dev/null; then
   sed -i 's|#DAEMON_CONF=""|DAEMON_CONF="/etc/hostapd/hostapd.conf"|' /etc/default/hostapd
 elif ! grep -q 'DAEMON_CONF=' /etc/default/hostapd 2>/dev/null; then
@@ -126,8 +130,6 @@ echo "[6/6] Enabling services..."
 systemctl unmask hostapd
 systemctl enable hostapd
 systemctl enable dnsmasq
-# Ensure wpa_supplicant runs so wlan0 connects to home WiFi
-systemctl enable wpa_supplicant 2>/dev/null || true
 
 echo ""
 echo "======================================================"
@@ -136,8 +138,8 @@ echo "    sudo reboot"
 echo ""
 echo "  After reboot:"
 echo "  - wlan0  → home WiFi (SSH / internet)"
-echo "  - $AP_IFACE   → MIDI-BOX hotspot @ $AP_IP"
-echo "  - WiFi network : '$AP_SSID'  password: $AP_PASS"
+echo "  - ${AP_IFACE}   → MIDI-BOX hotspot @ ${AP_IP}"
+echo "  - WiFi network : '${AP_SSID}'  password: ${AP_PASS}"
 echo "  - Web UI       : http://${AP_IP}:8080"
 echo "  - Or scan QR   : http://${AP_IP}:8080/display"
 echo "======================================================"
