@@ -1,0 +1,30 @@
+{
+  "name": "All Through",
+  "description": "Everything connected to everything. All controllers can play all synths.",
+  "routes": [
+    { "from": "KeyLab 88 MK2", "to": "MS-20 Mini", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "Behringer Model D", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "Roland JP-08", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "MicroBrute", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "Volca 1", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "Volca 2", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "Volca 3", "filter": {} },
+    { "from": "KeyLab 88 MK2", "to": "SP-404 MK2", "filter": {} },
+    { "from": "KeyStep", "to": "MS-20 Mini", "filter": {} },
+    { "from": "KeyStep", "to": "Behringer Model D", "filter": {} },
+    { "from": "KeyStep", "to": "Roland JP-08", "filter": {} },
+    { "from": "KeyStep", "to": "MicroBrute", "filter": {} },
+    { "from": "KeyStep", "to": "Volca 1", "filter": {} },
+    { "from": "KeyStep", "to": "Volca 2", "filter": {} },
+    { "from": "KeyStep", "to": "Volca 3", "filter": {} },
+    { "from": "KeyStep", "to": "SP-404 MK2", "filter": {} },
+    { "from": "SP-404 MK2", "to": "MS-20 Mini", "filter": {} },
+    { "from": "SP-404 MK2", "to": "Behringer Model D", "filter": {} },
+    { "from": "SP-404 MK2", "to": "Roland JP-08", "filter": {} },
+    { "from": "SP-404 MK2", "to": "MicroBrute", "filter": {} },
+    { "from": "SP-404 MK2", "to": "Volca 1", "filter": {} },
+    { "from": "SP-404 MK2", "to": "Volca 2", "filter": {} },
+    { "from": "SP-404 MK2", "to": "Volca 3", "filter": {} }
+  ],
+  "clock_source": "KeyLab 88 MK2"
+}

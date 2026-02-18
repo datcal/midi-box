@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI Box</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>MIDI BOX</h1>
+      <span class="mode-badge" id="mode-badge">--</span>
+    </div>
+    <ul class="sidebar-nav">
+      <li><a href="#dashboard" class="active" data-page="dashboard">
+        <span class="nav-icon">&#9635;</span><span>Dashboard</span>
+      </a></li>
+      <li><a href="#routing" data-page="routing">
+        <span class="nav-icon">&#8644;</span><span>Routing</span>
+      </a></li>
+      <li><a href="#presets" data-page="presets">
+        <span class="nav-icon">&#9776;</span><span>Presets</span>
+      </a></li>
+      <li><a href="#monitor" data-page="monitor">
+        <span class="nav-icon">&#9654;</span><span>MIDI Monitor</span>
+      </a></li>
+      <li><a href="#settings" data-page="settings">
+        <span class="nav-icon">&#9881;</span><span>Settings</span>
+      </a></li>
+      <li><a href="#logs" data-page="logs">
+        <span class="nav-icon">&#9993;</span><span>Logs</span>
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <span id="device-count">0</span> devices connected
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main">
+
+    <!-- ============== DASHBOARD ============== -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <p>System overview and device status</p>
+      </div>
+
+      <div class="grid-3" id="stats-row">
+        <div class="card stat-box">
+          <div class="stat-value" id="stat-devices">0</div>
+          <div class="stat-label">Devices</div>
+        </div>
+        <div class="card stat-box">
+          <div class="stat-value" id="stat-routes">0</div>
+          <div class="stat-label">Routes</div>
+        </div>
+        <div class="card stat-box">
+          <div class="stat-value" id="stat-messages">0</div>
+          <div class="stat-label">Messages</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Connected Devices</h3>
+          <button class="btn btn-sm" onclick="rescanDevices()">Rescan</button>
+        </div>
+        <div class="device-list" id="device-list"></div>
+      </div>
+    </div>
+
+    <!-- ============== ROUTING ============== -->
+    <div class="page" id="page-routing">
+      <div class="page-header">
+        <h2>Routing</h2>
+        <p>Click cells to create or remove routes between devices</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Routing Matrix</h3>
+          <div class="btn-group">
+            <button class="btn btn-sm btn-danger" onclick="clearAllRoutes()">Clear All</button>
+          </div>
+        </div>
+        <div class="routing-matrix" id="routing-matrix"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Active Routes</h3>
+        </div>
+        <ul class="route-list" id="route-list"></ul>
+      </div>
+    </div>
+
+    <!-- ============== PRESETS ============== -->
+    <div class="page" id="page-presets">
+      <div class="page-header">
+        <h2>Presets</h2>
+        <p>Load and manage routing presets</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Available Presets</h3>
+          <button class="btn btn-sm btn-accent" onclick="saveCurrentAsPreset()">Save Current</button>
+        </div>
+        <ul class="preset-list" id="preset-list"></ul>
+      </div>
+    </div>
+
+    <!-- ============== MIDI MONITOR ============== -->
+    <div class="page" id="page-monitor">
+      <div class="page-header">
+        <h2>MIDI Monitor</h2>
+        <p>Live MIDI message stream</p>
+      </div>
+
+      <div class="card">
+        <div class="monitor-controls">
+          <button class="btn btn-sm btn-accent" id="monitor-toggle" onclick="toggleMonitor()">Pause</button>
+          <button class="btn btn-sm" onclick="clearMonitor()">Clear</button>
+          <label style="font-size:12px; display:flex; align-items:center; gap:4px; margin-left:12px;">
+            <input type="checkbox" id="monitor-filter-clock" checked> Clock
+          </label>
+          <label style="font-size:12px; display:flex; align-items:center; gap:4px;">
+            <input type="checkbox" id="monitor-filter-active-sensing" checked> Active Sensing
+          </label>
+          <div class="monitor-stats">
+            <span id="monitor-total">0</span> messages
+          </div>
+        </div>
+        <div class="monitor-scroll">
+          <table class="monitor-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Dir</th>
+                <th>Source</th>
+                <th>Dest</th>
+                <th>Type</th>
+                <th>Ch</th>
+                <th>Data</th>
+                <th>Raw</th>
+              </tr>
+            </thead>
+            <tbody id="monitor-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== SETTINGS ============== -->
+    <div class="page" id="page-settings">
+      <div class="page-header">
+        <h2>Settings</h2>
+        <p>System configuration</p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><h3>General</h3></div>
+          <div class="settings-group">
+            <label>Platform</label>
+            <input type="text" id="setting-platform" readonly>
+          </div>
+          <div class="settings-group">
+            <label>Mode</label>
+            <input type="text" id="setting-mode" readonly>
+          </div>
+          <div class="settings-group">
+            <label>Current Preset</label>
+            <input type="text" id="setting-preset" readonly>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>MIDI Clock</h3></div>
+          <div class="settings-group">
+            <label>Clock Source</label>
+            <select id="setting-clock-source" onchange="setClockSource()">
+              <option value="">None</option>
+            </select>
+          </div>
+          <div class="settings-group" style="margin-top:16px;">
+            <button class="btn btn-accent" onclick="rescanDevices()">Rescan MIDI Devices</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:8px;">
+        <div class="card">
+          <div class="card-header"><h3>Export / Import</h3></div>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">
+            Export saves all routes, presets, and settings to a JSON file.
+            Import restores everything from a previously exported file.
+          </p>
+          <div class="btn-group">
+            <a class="btn btn-accent" href="/api/export" download="midi-box-export.json">Export State</a>
+            <button class="btn" onclick="document.getElementById('import-file').click()">Import State</button>
+            <input type="file" id="import-file" accept=".json" style="display:none" onchange="importState(this)">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h3>Reset</h3></div>
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;">
+            Reset clears all routes and returns to default state.
+          </p>
+          <button class="btn btn-danger" onclick="resetState()">Reset to Defaults</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== LOGS ============== -->
+    <div class="page" id="page-logs">
+      <div class="page-header">
+        <h2>Application Logs</h2>
+        <p>System log output</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Log Stream</h3>
+          <button class="btn btn-sm" onclick="clearLogs()">Clear</button>
+        </div>
+        <div class="log-viewer" id="log-viewer"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Filter Edit Modal -->
+<div class="modal-overlay" id="filter-modal">
+  <div class="modal">
+    <h3>Edit Route Filter</h3>
+    <div id="filter-modal-info" style="font-size:12px; color:var(--text-secondary); margin-bottom:12px;"></div>
+    <div class="form-row">
+      <label>Channel Filter (comma-separated, empty=all)</label>
+      <input type="text" id="filter-channels" placeholder="e.g. 1,2,3">
+    </div>
+    <div class="form-row">
+      <label>Remap to Channel (0=no remap)</label>
+      <input type="number" id="filter-remap" min="0" max="16" value="0">
+    </div>
+    <div class="form-row">
+      <label>Message Types (comma-separated, empty=all)</label>
+      <input type="text" id="filter-types" placeholder="e.g. note,cc,pitchwheel">
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeFilterModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="applyFilter()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

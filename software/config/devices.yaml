@@ -1,0 +1,87 @@
+# =============================================================================
+# MIDI Box - Device Configuration
+# =============================================================================
+# Maps USB vendor:product IDs to friendly names and default settings.
+# Maps hardware serial ports to connected devices.
+#
+# To find your device's USB ID, run: lsusb
+# To find ALSA MIDI port names, run: aconnect -l
+# =============================================================================
+
+usb_devices:
+  # Arturia KeyLab 88 MK2
+  "1c75:0206":
+    name: "KeyLab 88 MK2"
+    type: controller
+    ports: 1
+    default_channel: 0  # 0 = all channels
+
+  # Arturia KeyStep
+  "1c75:0288":
+    name: "KeyStep"
+    type: controller_sequencer
+    ports: 1
+    default_channel: 0
+
+  # Behringer Model D
+  "1397:00d2":
+    name: "Behringer Model D"
+    type: synth
+    ports: 1
+    default_channel: 2
+
+  # Roland JP-08 Boutique
+  # Note: Roland USB IDs vary - check with lsusb
+  "0582:0191":
+    name: "Roland JP-08"
+    type: synth
+    ports: 1
+    default_channel: 3
+
+  # Arturia MicroBrute
+  "1c75:0207":
+    name: "MicroBrute"
+    type: synth
+    ports: 1
+    default_channel: 7
+
+  # Roland SP-404 MK2
+  "0582:01e5":
+    name: "SP-404 MK2"
+    type: sampler
+    ports: 1
+    default_channel: 10
+
+
+# Hardware ports (SC16IS752 UARTs + Pi native UART)
+# Keys are the serial device basename (e.g., ttySC0)
+hardware_ports:
+  ttySC0:
+    name: "MS-20 Mini"
+    direction: out
+    type: synth
+    default_channel: 1
+
+  ttySC1:
+    name: "Volca 1"
+    direction: out
+    type: synth
+    default_channel: 4
+
+  ttySC2:
+    name: "Volca 2"
+    direction: out
+    type: synth
+    default_channel: 5
+
+  ttySC3:
+    name: "Volca 3"
+    direction: out
+    type: synth
+    default_channel: 6
+
+  ttyAMA0:
+    name: "Spare DIN 1"
+    direction: both
+    type: unknown
+    default_channel: 0

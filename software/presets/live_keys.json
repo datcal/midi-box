@@ -1,0 +1,27 @@
+{
+  "name": "Live Keys",
+  "description": "KeyLab 88 plays all synths layered. Great for live performance with big sounds.",
+  "routes": [
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "MS-20 Mini",
+      "filter": { "remap_channel": 1, "message_types": ["note", "pitchwheel"] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Behringer Model D",
+      "filter": { "remap_channel": 1, "message_types": ["note", "pitchwheel"] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Roland JP-08",
+      "filter": { "remap_channel": 1, "message_types": ["note", "pitchwheel", "cc"] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "MicroBrute",
+      "filter": { "remap_channel": 1, "message_types": ["note", "pitchwheel"] }
+    }
+  ],
+  "clock_source": "KeyLab 88 MK2"
+}

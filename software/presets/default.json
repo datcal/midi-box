@@ -1,0 +1,47 @@
+{
+  "name": "Default",
+  "description": "KeyLab 88 controls all synths. Each synth on its own MIDI channel.",
+  "routes": [
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "MS-20 Mini",
+      "filter": { "channels": [1] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Behringer Model D",
+      "filter": { "channels": [2] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Roland JP-08",
+      "filter": { "channels": [3] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Volca 1",
+      "filter": { "channels": [4] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Volca 2",
+      "filter": { "channels": [5] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Volca 3",
+      "filter": { "channels": [6] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "MicroBrute",
+      "filter": { "channels": [7] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "SP-404 MK2",
+      "filter": { "channels": [10] }
+    }
+  ],
+  "clock_source": "KeyLab 88 MK2"
+}

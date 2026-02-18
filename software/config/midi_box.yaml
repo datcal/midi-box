@@ -1,0 +1,35 @@
+# =============================================================================
+# MIDI Box - Main Configuration
+# =============================================================================
+
+# General settings
+general:
+  default_preset: "default"
+  log_level: "INFO"           # DEBUG, INFO, WARNING, ERROR
+  hotplug_poll_interval: 2.0  # Seconds between USB device scans
+
+# Platform: "auto", "mac", or "pi"
+# auto = detect at runtime
+platform: "auto"
+
+# USB Gadget settings (DAW mode, Pi only)
+gadget:
+  enabled: true
+  num_ports: 10
+  auto_detect_mode: true
+
+# Hardware MIDI settings (Pi only - SC16IS752 UARTs)
+hardware:
+  enabled: true
+  uart_chips:
+    - address: 0x48
+      channels: 2
+    - address: 0x49
+      channels: 2
+
+# Web UI settings
+web_ui:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  midi_log_max: 500          # Max MIDI messages kept in memory for the log view

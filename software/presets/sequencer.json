@@ -1,0 +1,42 @@
+{
+  "name": "Sequencer",
+  "description": "KeyStep sequences the Volcas and MS-20. KeyLab controls the poly synths.",
+  "routes": [
+    {
+      "from": "KeyStep",
+      "to": "Volca 1",
+      "filter": { "channels": [1], "remap_channel": 1 }
+    },
+    {
+      "from": "KeyStep",
+      "to": "Volca 2",
+      "filter": { "channels": [2], "remap_channel": 1 }
+    },
+    {
+      "from": "KeyStep",
+      "to": "Volca 3",
+      "filter": { "channels": [3], "remap_channel": 1 }
+    },
+    {
+      "from": "KeyStep",
+      "to": "MS-20 Mini",
+      "filter": { "channels": [4], "remap_channel": 1 }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Roland JP-08",
+      "filter": { "channels": [5] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Behringer Model D",
+      "filter": { "channels": [6] }
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "MicroBrute",
+      "filter": { "channels": [7] }
+    }
+  ],
+  "clock_source": "KeyStep"
+}
