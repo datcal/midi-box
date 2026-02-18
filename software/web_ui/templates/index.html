@@ -204,6 +204,43 @@
         </div>
       </div>
 
+      <div class="card" style="margin-top:8px;">
+        <div class="card-header">
+          <h3>Connect from iPad / Phone</h3>
+          <a href="/display" target="_blank" class="btn btn-sm btn-accent">Full Display</a>
+        </div>
+        <div class="connect-section">
+          <div class="connect-qr-block">
+            <div class="connect-qr-step">1. Join WiFi</div>
+            <img src="/api/qr/wifi.svg" class="connect-qr-img" alt="WiFi QR">
+            <div class="connect-qr-info" id="connect-wifi-text">MIDI-BOX</div>
+          </div>
+          <div class="connect-qr-block">
+            <div class="connect-qr-step">2. Open URL</div>
+            <img src="/api/qr/url.svg" class="connect-qr-img" alt="URL QR">
+            <div class="connect-qr-info" id="connect-url-text">—</div>
+          </div>
+          <div class="connect-creds">
+            <div class="connect-row">
+              <span class="connect-label">Network</span>
+              <span id="connect-ssid">—</span>
+            </div>
+            <div class="connect-row">
+              <span class="connect-label">Password</span>
+              <code id="connect-pass">—</code>
+            </div>
+            <div class="connect-row">
+              <span class="connect-label">URL</span>
+              <code id="connect-url">—</code>
+            </div>
+            <p style="font-size:11px; color:var(--text-muted); margin-top:16px; line-height:1.6;">
+              Scan the WiFi QR with your iPhone camera to join the network,<br>
+              then scan the URL QR to open the control interface.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-2" style="margin-top:8px;">
         <div class="card">
           <div class="card-header"><h3>Export / Import</h3></div>

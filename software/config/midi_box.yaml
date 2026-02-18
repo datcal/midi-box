@@ -33,3 +33,12 @@ web_ui:
   host: "0.0.0.0"
   port: 8080
   midi_log_max: 500          # Max MIDI messages kept in memory for the log view
+
+# WiFi Access Point settings (Pi only)
+# Run scripts/setup_wifi_ap.sh once to configure the Pi as a hotspot.
+# iPad/phone connects to this network, then opens the URL below.
+wifi_ap:
+  ssid: "MIDI-BOX"
+  password: "midibox123"
+  ip: "192.168.4.1"          # Pi's static IP in AP mode
+  channel: 6

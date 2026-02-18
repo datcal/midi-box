@@ -18,6 +18,7 @@ API:
   /api/logs      - Application log stream
 """
 
+import io
 import json
 import time
 import logging
@@ -75,6 +76,45 @@ def create_app(midi_box_instance):
     @app.route("/logs")
     def logs_page():
         return render_template("index.html", page="logs")
+
+    @app.route("/display")
+    def display_page():
+        return render_template("display.html")
+
+    # ---------------------------------------------------------------
+    # API: Network / WiFi AP info
+    # ---------------------------------------------------------------
+
+    @app.route("/api/network")
+    def api_network():
+        cfg = _midi_box.wifi_config
+        ip   = cfg.get("ip", "192.168.4.1")
+        port = cfg.get("port", 8080)
+        return jsonify({
+            "ssid":     cfg.get("ssid", "MIDI-BOX"),
+            "password": cfg.get("password", "midibox123"),
+            "ip":       ip,
+            "port":     port,
+            "url":      f"http://{ip}:{port}",
+        })
+
+    @app.route("/api/qr/<qr_type>.svg")
+    def api_qr(qr_type):
+        cfg  = _midi_box.wifi_config
+        ip   = cfg.get("ip", "192.168.4.1")
+        port = cfg.get("port", 8080)
+
+        if qr_type == "wifi":
+            data = (
+                f"WIFI:T:WPA;S:{cfg.get('ssid','MIDI-BOX')};"
+                f"P:{cfg.get('password','midibox123')};;"
+            )
+        elif qr_type == "url":
+            data = f"http://{ip}:{port}"
+        else:
+            return jsonify({"error": "unknown type"}), 404
+
+        return _make_qr_svg(data)
 
     # ---------------------------------------------------------------
     # API: Devices
@@ -345,6 +385,34 @@ def create_app(midi_box_instance):
         _midi_box.router.clear_routes()
         _midi_box.presets.current_preset = None
         return jsonify({"ok": True})
+
+    def _make_qr_svg(data: str) -> Response:
+        try:
+            import qrcode
+            import qrcode.image.svg
+            qr = qrcode.QRCode(
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=10,
+                border=3,
+            )
+            qr.add_data(data)
+            qr.make(fit=True)
+            img = qr.make_image(image_factory=qrcode.image.svg.SvgFillImage)
+            buf = io.BytesIO()
+            img.save(buf)
+            buf.seek(0)
+            return Response(buf.read(), mimetype="image/svg+xml")
+        except ImportError:
+            placeholder = (
+                '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">'
+                '<rect width="200" height="200" fill="#1e2a45"/>'
+                '<text x="100" y="96" text-anchor="middle" fill="#8892a4" '
+                'font-family="monospace" font-size="11">install qrcode</text>'
+                '<text x="100" y="112" text-anchor="middle" fill="#8892a4" '
+                'font-family="monospace" font-size="11">pip install qrcode</text>'
+                '</svg>'
+            )
+            return Response(placeholder, mimetype="image/svg+xml")
 
     return app
 

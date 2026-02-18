@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI BOX — Connect</title>
+  <style>
+    :root {
+      --bg:     #0d1117;
+      --card:   #161b22;
+      --border: #2a3a5c;
+      --accent: #0f9b8e;
+      --text:   #e0e0e0;
+      --muted:  #8892a4;
+      --green:  #2ecc71;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+      gap: 0;
+    }
+
+    /* --- Brand --- */
+    .brand {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 5px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .tagline {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 44px;
+    }
+
+    /* --- QR row --- */
+    .qr-row {
+      display: flex;
+      gap: 56px;
+      align-items: flex-start;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .qr-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .qr-step {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .qr-img {
+      width: 200px;
+      height: 200px;
+      background: #fff;
+      border-radius: 14px;
+      padding: 6px;
+      display: block;
+    }
+
+    .qr-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .qr-detail {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.7;
+    }
+
+    .qr-detail strong {
+      color: var(--text);
+      display: block;
+      font-size: 15px;
+    }
+
+    /* Divider between QR blocks */
+    .qr-sep {
+      width: 1px;
+      background: var(--border);
+      align-self: stretch;
+      margin: 28px 0;
+    }
+
+    /* --- Status bar --- */
+    .status-bar {
+      margin-top: 48px;
+      display: flex;
+      gap: 32px;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 5px var(--accent);
+    }
+
+    #s-time {
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 600;
+      margin-left: auto;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="brand">MIDI BOX</div>
+  <div class="tagline">MIDI Router &mdash; Live Control</div>
+
+  <div class="qr-row">
+
+    <div class="qr-block">
+      <div class="qr-step">Step 1</div>
+      <img src="/api/qr/wifi.svg" class="qr-img" alt="WiFi QR code">
+      <div class="qr-title">Join WiFi</div>
+      <div class="qr-detail" id="wifi-detail">
+        <strong>MIDI-BOX</strong>
+        Password: midibox123
+      </div>
+    </div>
+
+    <div class="qr-sep"></div>
+
+    <div class="qr-block">
+      <div class="qr-step">Step 2</div>
+      <img src="/api/qr/url.svg" class="qr-img" alt="URL QR code">
+      <div class="qr-title">Open URL</div>
+      <div class="qr-detail" id="url-detail">
+        <strong>192.168.4.1:8080</strong>
+        Tap to open in Safari
+      </div>
+    </div>
+
+  </div>
+
+  <div class="status-bar">
+    <div class="status-item">
+      <span class="status-dot"></span>
+      <span id="s-devices">— devices</span>
+    </div>
+    <div class="status-item">
+      <span class="status-dot"></span>
+      <span id="s-routes">— routes</span>
+    </div>
+    <div class="status-item">
+      <span class="status-dot"></span>
+      <span id="s-preset">no preset</span>
+    </div>
+    <span id="s-time">--:--</span>
+  </div>
+
+  <script>
+    // Load network info and update display
+    fetch('/api/network').then(r => r.json()).then(d => {
+      document.getElementById('wifi-detail').innerHTML =
+        `<strong>${d.ssid}</strong>Password: ${d.password}`;
+      document.getElementById('url-detail').innerHTML =
+        `<strong>${d.url}</strong>Open in Safari`;
+    }).catch(() => {});
+
+    // Update status bar
+    function updateStatus() {
+      fetch('/api/settings').then(r => r.json()).then(d => {
+        document.getElementById('s-devices').textContent = `${d.total_devices} devices`;
+        document.getElementById('s-routes').textContent  = `${d.total_routes} routes`;
+        document.getElementById('s-preset').textContent  = d.preset || 'no preset';
+      }).catch(() => {});
+
+      const now = new Date();
+      document.getElementById('s-time').textContent =
+        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    updateStatus();
+    setInterval(updateStatus, 10000);
+  </script>
+
+</body>
+</html>

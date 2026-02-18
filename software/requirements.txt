@@ -3,6 +3,7 @@ mido>=1.3.0
 python-rtmidi>=1.5.0
 flask>=3.0
 pyyaml>=6.0
+qrcode>=7.4          # QR code generation for WiFi connect display
 
 # Hardware MIDI serial (used on Pi for SC16IS752, optional on Mac)
 pyserial>=3.5

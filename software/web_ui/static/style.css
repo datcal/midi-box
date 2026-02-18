@@ -586,6 +586,77 @@ body {
 .log-entry .log-name { color: var(--text-secondary); min-width: 120px; }
 .log-entry .log-msg { color: var(--text-primary); }
 
+/* --- Connect / WiFi card --- */
+
+.connect-section {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.connect-qr-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.connect-qr-step {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.connect-qr-img {
+  width: 120px;
+  height: 120px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 4px;
+  display: block;
+}
+
+.connect-qr-info {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.connect-creds {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 24px;
+}
+
+.connect-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.connect-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 68px;
+}
+
+.connect-row code {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--accent);
+}
+
 /* --- Settings --- */
 
 .settings-group {

@@ -559,19 +559,30 @@ async function clearMonitor() {
 // --- Settings ---
 
 async function loadSettings() {
-  const data = await api('/settings');
+  const [data, devData, netData] = await Promise.all([
+    api('/settings'),
+    api('/devices'),
+    api('/network'),
+  ]);
+
   document.getElementById('setting-platform').value = data.platform;
   document.getElementById('setting-mode').value = data.mode;
   document.getElementById('setting-preset').value = data.preset || '(none)';
 
   // Populate clock source dropdown
-  const devData = await api('/devices');
   const select = document.getElementById('setting-clock-source');
   select.innerHTML = '<option value="">None</option>';
   devData.devices.forEach(d => {
     const selected = d.name === data.clock_source ? 'selected' : '';
     select.innerHTML += `<option value="${esc(d.name)}" ${selected}>${esc(d.name)}</option>`;
   });
+
+  // Populate connect / WiFi section
+  document.getElementById('connect-ssid').textContent  = netData.ssid;
+  document.getElementById('connect-pass').textContent  = netData.password;
+  document.getElementById('connect-url').textContent   = netData.url;
+  document.getElementById('connect-wifi-text').textContent = netData.ssid;
+  document.getElementById('connect-url-text').textContent  = netData.url;
 }
 
 async function setClockSource() {

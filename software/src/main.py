@@ -70,6 +70,7 @@ class MidiBox:
         self.midi_logger = MidiLogger(max_entries=500)
         self.log_buffer = LogBuffer()
         self.mode = "standalone"
+        self.wifi_config = self._load_wifi_config()
         self._running = False
         self._web_thread = None
 
@@ -168,6 +169,26 @@ class MidiBox:
                 logger.info(f"  USB: {device.name}")
         if not ports:
             logger.info("  No USB MIDI devices found")
+
+    def _load_wifi_config(self) -> dict:
+        """Load WiFi AP settings from midi_box.yaml, falling back to defaults."""
+        import yaml
+        from pathlib import Path
+        config_path = Path(__file__).resolve().parent.parent / "config" / "midi_box.yaml"
+        defaults = {
+            "ssid": "MIDI-BOX",
+            "password": "midibox123",
+            "ip": "192.168.4.1",
+            "port": getattr(self.args, "port", 8080),
+        }
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            defaults.update(cfg.get("wifi_ap", {}))
+            defaults["port"] = getattr(self.args, "port", 8080)
+        except FileNotFoundError:
+            pass
+        return defaults
 
     def _init_mock_devices(self):
         """Register all devices from config as fake connected devices (no hardware needed)."""
