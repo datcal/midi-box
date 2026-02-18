@@ -77,23 +77,30 @@
     <!-- ============== ROUTING ============== -->
     <div class="page" id="page-routing">
       <div class="page-header">
-        <h2>Routing</h2>
-        <p id="routing-hint">Tap a source to select it, then tap destinations to connect</p>
+        <div class="routing-header">
+          <h2>Routing</h2>
+          <div class="routing-controls">
+            <div class="tab-switch">
+              <button class="tab-btn active" id="tab-perform" onclick="setRoutingMode('perform')">Perform</button>
+              <button class="tab-btn" id="tab-advanced" onclick="setRoutingMode('advanced')">Advanced</button>
+            </div>
+            <label class="exclusive-label" title="Exclusive: one keyboard connects to only one destination at a time">
+              <input type="checkbox" id="exclusive-mode" onchange="renderPatchbay()">
+              <span class="exclusive-switch"></span>
+              <span>Exclusive</span>
+            </label>
+          </div>
+        </div>
+        <p id="routing-hint">Tap a keyboard to select it, then tap a destination</p>
       </div>
 
-      <div class="patchbay">
-        <div class="patchbay-col">
-          <div class="patchbay-col-header">&#9000; Sources</div>
-          <div id="patchbay-sources"></div>
-        </div>
-        <div class="patchbay-divider">&#8644;</div>
-        <div class="patchbay-col">
-          <div class="patchbay-col-header">&#9836; Destinations</div>
-          <div id="patchbay-dests" class="patchbay-dests-grid"></div>
-        </div>
+      <div class="patchbay-canvas" id="patchbay-canvas">
+        <svg class="pb-lines" id="pb-lines" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="pb-col" id="patchbay-sources"></div>
+        <div class="pb-col" id="patchbay-dests"></div>
       </div>
 
-      <div class="card" style="margin-top:16px;">
+      <div class="card" style="margin-top:20px;">
         <div class="card-header">
           <h3>Active Routes</h3>
           <button class="btn btn-sm btn-danger" onclick="clearAllRoutes()">Clear All</button>

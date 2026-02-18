@@ -110,6 +110,14 @@ async function rescanDevices() {
 
 let pendingFilterRoute = null;
 let selectedSource = null;
+let routingMode = 'perform'; // 'perform' | 'advanced'
+
+// Controllers/keyboards are sources in Perform mode; synths/samplers are destinations
+const CONTROLLER_TYPES = new Set(['controller', 'controller_sequencer']);
+
+function deviceId(name) {
+  return name.replace(/[^a-zA-Z0-9]/g, '_');
+}
 
 async function loadRouting() {
   const [devData, routeData] = await Promise.all([
@@ -123,9 +131,32 @@ async function loadRouting() {
   renderRouteList();
 }
 
+function setRoutingMode(mode) {
+  routingMode = mode;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + mode)?.classList.add('active');
+  selectedSource = null;
+  renderPatchbay();
+}
+
 function renderPatchbay() {
-  const sources = devices.filter(d => d.direction === 'both' || d.direction === 'in');
-  const dests   = devices.filter(d => d.direction === 'both' || d.direction === 'out');
+  let sources, dests;
+
+  if (routingMode === 'perform') {
+    // Perform: keyboards → synths/samplers only
+    sources = devices.filter(d =>
+      CONTROLLER_TYPES.has(d.device_type) &&
+      (d.direction === 'both' || d.direction === 'in')
+    );
+    dests = devices.filter(d =>
+      !CONTROLLER_TYPES.has(d.device_type) &&
+      (d.direction === 'both' || d.direction === 'out')
+    );
+  } else {
+    // Advanced: all devices on both sides
+    sources = devices.filter(d => d.direction === 'both' || d.direction === 'in');
+    dests   = devices.filter(d => d.direction === 'both' || d.direction === 'out');
+  }
 
   // Build route map: from -> Set of tos
   const routeMap = {};
@@ -134,28 +165,36 @@ function renderPatchbay() {
     routeMap[r.from].add(r.to);
   });
 
-  // Validate selected source still exists
+  // Validate selected source still exists in current view
   if (selectedSource && !sources.find(d => d.name === selectedSource)) {
     selectedSource = null;
   }
 
+  const activeSet = (selectedSource && routeMap[selectedSource])
+    ? routeMap[selectedSource] : new Set();
+  const canTap = !!selectedSource;
+  const exclusive = document.getElementById('exclusive-mode')?.checked;
+
   // --- Sources ---
   const sourcesEl = document.getElementById('patchbay-sources');
+  sourcesEl.innerHTML = '<div class="pb-col-label">Sources</div>';
+
   if (sources.length === 0) {
-    sourcesEl.innerHTML = '<div class="pb-empty">No source devices found</div>';
+    sourcesEl.innerHTML += '<div class="pb-empty">No source devices</div>';
   } else {
-    sourcesEl.innerHTML = sources.map(d => {
+    sourcesEl.innerHTML += sources.map(d => {
       const isSelected = selectedSource === d.name;
-      const connected  = routeMap[d.name] ? [...routeMap[d.name]] : [];
-      const chLabel    = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
+      const routeCount = routeMap[d.name] ? routeMap[d.name].size : 0;
+      const chLabel = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
       return `
-        <div class="pb-device ${isSelected ? 'pb-selected' : ''}"
+        <div id="src_${deviceId(d.name)}"
+             class="pb-box ${isSelected ? 'pb-box-selected' : routeCount > 0 ? 'pb-box-active' : ''}"
              onclick="selectSource('${esc(d.name)}')">
-          ${isSelected ? '<div class="pb-badge pb-badge-src">SELECTED</div>' : ''}
-          <div class="pb-device-name">${esc(d.name)}</div>
-          <div class="pb-device-meta">${chLabel} &middot; ${d.port_type.toUpperCase()}</div>
-          ${connected.length
-            ? `<div class="pb-device-routes">&#8594; ${connected.map(esc).join(', ')}</div>`
+          <div class="pb-box-label">${isSelected ? 'SELECTED' : 'SOURCE'}</div>
+          <div class="pb-box-name">${esc(d.name)}</div>
+          <div class="pb-box-meta">${chLabel} &middot; ${esc(d.device_type)}</div>
+          ${routeCount > 0
+            ? `<div class="pb-box-count">${routeCount} route${routeCount !== 1 ? 's' : ''}</div>`
             : ''}
         </div>`;
     }).join('');
@@ -163,39 +202,114 @@ function renderPatchbay() {
 
   // --- Destinations ---
   const destsEl = document.getElementById('patchbay-dests');
-  const activeSet = (selectedSource && routeMap[selectedSource]) ? routeMap[selectedSource] : new Set();
-  const canTap = !!selectedSource;
+  destsEl.innerHTML = '<div class="pb-col-label">Destinations</div>';
 
-  if (dests.length === 0) {
-    destsEl.innerHTML = '<div class="pb-empty">No destination devices found</div>';
+  const destList = dests.filter(d => d.name !== selectedSource);
+
+  if (destList.length === 0) {
+    destsEl.innerHTML += '<div class="pb-empty">No destination devices</div>';
   } else {
-    destsEl.innerHTML = dests.map(d => {
-      if (d.name === selectedSource) return ''; // skip self-route
+    destsEl.innerHTML += destList.map(d => {
       const isConnected = activeSet.has(d.name);
-      const chLabel     = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
+      const chLabel = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
+
+      let cls = 'pb-box';
+      if (isConnected)          cls += ' pb-box-connected';
+      if (canTap && isConnected)  cls += ' pb-box-will-disconnect';
+      if (canTap && !isConnected) cls += ' pb-box-will-connect';
+
+      const onclick = canTap
+        ? `onclick="toggleRoutePatchbay('${esc(d.name)}',${isConnected})"`
+        : '';
+
       return `
-        <div class="pb-device ${isConnected ? 'pb-connected' : ''} ${canTap ? 'pb-tappable' : ''}"
-             onclick="${canTap ? `toggleRoutePatchbay('${esc(d.name)}',${isConnected})` : ''}">
-          ${isConnected ? '<div class="pb-badge pb-badge-ok">&#10003; ROUTED</div>' : ''}
-          <div class="pb-device-name">${esc(d.name)}</div>
-          <div class="pb-device-meta">${chLabel} &middot; ${d.port_type.toUpperCase()}</div>
-          ${isConnected
-            ? `<button class="btn btn-sm" style="margin-top:8px;"
-                       onclick="event.stopPropagation(); editRouteFilter(null,'${esc(selectedSource)}','${esc(d.name)}')">Filter / Channel</button>`
+        <div id="dst_${deviceId(d.name)}" class="${cls}" ${onclick}>
+          <div class="pb-box-label">${isConnected ? '&#10003; CONNECTED' : 'DEST'}</div>
+          <div class="pb-box-name">${esc(d.name)}</div>
+          <div class="pb-box-meta">${chLabel} &middot; ${esc(d.device_type)}</div>
+          ${isConnected && selectedSource
+            ? `<button class="btn btn-sm" style="margin-top:10px;"
+                onclick="event.stopPropagation(); editRouteFilter(null,'${esc(selectedSource)}','${esc(d.name)}')">
+                Filter / Ch</button>`
             : ''}
         </div>`;
     }).join('');
   }
 
-  // Update hint text
+  // Update hint
   const hint = document.getElementById('routing-hint');
   if (selectedSource) {
-    hint.textContent = `Source: ${selectedSource} — tap a destination to connect or disconnect`;
+    const exNote = exclusive ? ' — exclusive (replaces current)' : '';
+    hint.textContent = `${selectedSource} selected${exNote} — tap a destination`;
     hint.style.color = 'var(--accent)';
   } else {
-    hint.textContent = 'Tap a source to select it, then tap destinations to connect';
+    hint.textContent = routingMode === 'perform'
+      ? 'Tap a keyboard or controller to select it'
+      : 'Tap any source device to select it';
     hint.style.color = '';
   }
+
+  // Draw SVG connection lines after layout settles
+  requestAnimationFrame(drawConnections);
+}
+
+function drawConnections() {
+  const svg = document.getElementById('pb-lines');
+  const canvas = document.getElementById('patchbay-canvas');
+  if (!svg || !canvas) return;
+
+  const cr = canvas.getBoundingClientRect();
+
+  svg.innerHTML = `<defs>
+    <marker id="arr"     markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#0f9b8e"/></marker>
+    <marker id="arr-sel" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#12c4b3"/></marker>
+    <marker id="arr-off" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0,8 3,0 6" fill="#5a6577"/></marker>
+  </defs>`;
+
+  routes.forEach(route => {
+    const srcEl = document.getElementById('src_' + deviceId(route.from));
+    const dstEl = document.getElementById('dst_' + deviceId(route.to));
+    if (!srcEl || !dstEl) return;
+
+    const sr = srcEl.getBoundingClientRect();
+    const dr = dstEl.getBoundingClientRect();
+
+    const x1 = sr.right  - cr.left;
+    const y1 = sr.top    + sr.height / 2 - cr.top;
+    const x2 = dr.left   - cr.left;
+    const y2 = dr.top    + dr.height / 2 - cr.top;
+    const dx = Math.max(48, Math.abs(x2 - x1) * 0.42);
+
+    const isSel = route.from === selectedSource;
+    const isOff = route.enabled === false;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${x1+dx} ${y1} ${x2-dx} ${y2} ${x2} ${y2}`);
+    path.setAttribute('fill', 'none');
+
+    if (isOff) {
+      path.setAttribute('stroke', '#5a6577');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('stroke-dasharray', '6,4');
+      path.setAttribute('opacity', '0.35');
+      path.setAttribute('marker-end', 'url(#arr-off)');
+    } else if (isSel) {
+      path.setAttribute('stroke', '#12c4b3');
+      path.setAttribute('stroke-width', '2.5');
+      path.setAttribute('opacity', '1');
+      path.setAttribute('marker-end', 'url(#arr-sel)');
+    } else {
+      path.setAttribute('stroke', '#0f9b8e');
+      path.setAttribute('stroke-width', '1.5');
+      path.setAttribute('opacity', '0.45');
+      path.setAttribute('marker-end', 'url(#arr)');
+    }
+
+    svg.appendChild(path);
+  });
 }
 
 function selectSource(name) {
@@ -205,9 +319,18 @@ function selectSource(name) {
 
 async function toggleRoutePatchbay(to, isConnected) {
   if (!selectedSource) return;
+  const exclusive = document.getElementById('exclusive-mode')?.checked;
+
   if (isConnected) {
     await api('/routes', { method: 'DELETE', body: { from: selectedSource, to } });
   } else {
+    if (exclusive) {
+      // Remove all existing routes from this source before adding the new one
+      const existing = routes.filter(r => r.from === selectedSource).map(r => r.to);
+      for (const dst of existing) {
+        await api('/routes', { method: 'DELETE', body: { from: selectedSource, to: dst } });
+      }
+    }
     await api('/routes', { method: 'POST', body: { from: selectedSource, to, filter: {} } });
   }
   await loadRouting();
@@ -569,4 +692,8 @@ window.addEventListener('hashchange', handleHash);
 document.addEventListener('DOMContentLoaded', () => {
   handleHash();
   startPolling();
+});
+
+window.addEventListener('resize', () => {
+  if (currentPage === 'routing') drawConnections();
 });
