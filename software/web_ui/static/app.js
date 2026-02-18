@@ -93,15 +93,29 @@ async function loadDashboard() {
         ${d.midi_channel ? ' &middot; ch ' + d.midi_channel : ''}
       </div>
       <div class="device-activity">
-        <span class="activity-dot ${d.activity_in ? 'active-in' : ''}" title="IN: ${d.msg_count_in} msgs"></span>
-        <span class="activity-dot ${d.activity_out ? 'active-out' : ''}" title="OUT: ${d.msg_count_out} msgs"></span>
-        <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">
+        <span id="dot-in-${deviceId(d.name)}" class="activity-dot ${d.activity_in ? 'active-in' : ''}" title="IN: ${d.msg_count_in} msgs"></span>
+        <span id="dot-out-${deviceId(d.name)}" class="activity-dot ${d.activity_out ? 'active-out' : ''}" title="OUT: ${d.msg_count_out} msgs"></span>
+        <span id="count-${deviceId(d.name)}" style="font-size:11px; color:var(--text-muted); margin-left:4px;">
           IN:${d.msg_count_in} OUT:${d.msg_count_out}
         </span>
         <button class="btn btn-sm" style="margin-left:auto;" onclick="openDeviceModal('${esc(d.name)}')">Configure</button>
       </div>
     </div>
   `).join('');
+}
+
+// Lightweight dashboard update — only refreshes activity dots/counts.
+// Called by the background poll instead of re-rendering the whole page.
+function updateDashboardActivity(pollData) {
+  for (const d of pollData.devices) {
+    const id = deviceId(d.name);
+    const dotIn  = document.getElementById(`dot-in-${id}`);
+    const dotOut = document.getElementById(`dot-out-${id}`);
+    const count  = document.getElementById(`count-${id}`);
+    if (dotIn)  { dotIn.className  = `activity-dot ${d.active_in  ? 'active-in'  : ''}`; dotIn.title  = `IN: ${d.count_in} msgs`;  }
+    if (dotOut) { dotOut.className = `activity-dot ${d.active_out ? 'active-out' : ''}`; dotOut.title = `OUT: ${d.count_out} msgs`; }
+    if (count)  { count.textContent = `IN:${d.count_in} OUT:${d.count_out}`; }
+  }
 }
 
 async function rescanDevices() {
@@ -500,7 +514,7 @@ async function saveCurrentAsPreset() {
 
 function startMonitor() {
   if (monitorInterval) clearInterval(monitorInterval);
-  monitorInterval = setInterval(refreshMonitor, 200);
+  monitorInterval = setInterval(refreshMonitor, 500);
   refreshMonitor();
 }
 
@@ -672,7 +686,7 @@ async function loadLauncher() {
 
   // Start polling
   if (launcherInterval) clearInterval(launcherInterval);
-  launcherInterval = setInterval(pollLauncher, 200);
+  launcherInterval = setInterval(pollLauncher, 500);
 }
 
 async function pollLauncher() {
@@ -1130,9 +1144,13 @@ function esc(str) {
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(async () => {
-    if (currentPage === 'dashboard') {
-      loadDashboard();
-    }
+    if (currentPage !== 'dashboard') return;
+    // Use the lightweight /api/poll endpoint — only updates activity dots,
+    // never re-renders the whole device list (that happens on page load only).
+    try {
+      const data = await api('/poll');
+      updateDashboardActivity(data);
+    } catch (_) { /* ignore transient failures */ }
   }, 2000);
 }
 

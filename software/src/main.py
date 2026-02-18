@@ -326,6 +326,7 @@ class MidiBox:
                 "port": self.args.port,
                 "debug": False,
                 "use_reloader": False,
+                "threaded": True,   # each HTTP request gets its own thread
             },
             daemon=True,
         )
