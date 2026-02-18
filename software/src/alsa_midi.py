@@ -31,8 +31,12 @@ class AlsaMidi:
 
     def scan_devices(self) -> list[str]:
         """Scan for available MIDI input and output ports."""
-        inputs = set(mido.get_input_names())
-        outputs = set(mido.get_output_names())
+        try:
+            inputs = set(mido.get_input_names())
+            outputs = set(mido.get_output_names())
+        except Exception as e:
+            logger.warning(f"ALSA not available (no MIDI devices): {e}")
+            return []
         all_ports = inputs | outputs
 
         # Filter out system ports (like "Midi Through")
