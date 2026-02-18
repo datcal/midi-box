@@ -1,5 +1,9 @@
 """
-Web UI - Flask + WebSocket server for MIDI Box.
+Web UI - Flask server for MIDI Box.
+
+Runs as a separate process from the MIDI routing engine.
+All state is read from the IPC shared dict; all mutations go through
+the command queue so the MIDI process handles them atomically.
 
 Pages:
   /              - Dashboard (device status, activity)
@@ -29,13 +33,31 @@ from flask import Flask, render_template, jsonify, request, Response
 
 logger = logging.getLogger("midi-box.web")
 
-# We'll store a reference to the MidiBox app instance
-_midi_box = None
+# IPC bridge reference — set by run_flask_process()
+_bridge = None
 
 
-def create_app(midi_box_instance):
-    global _midi_box
-    _midi_box = midi_box_instance
+def run_flask_process(bridge, host: str, port: int):
+    """Entry point for the Flask subprocess."""
+    global _bridge
+    _bridge = bridge
+
+    # Silence Flask/Werkzeug request logging to keep output clean
+    log = logging.getLogger("werkzeug")
+    log.setLevel(logging.ERROR)
+
+    app = create_app(bridge)
+    app.run(
+        host=host,
+        port=port,
+        debug=False,
+        use_reloader=False,
+        threaded=True,      # each HTTP request gets its own thread
+    )
+
+
+def create_app(bridge):
+    """Create the Flask application backed by an IpcBridge."""
 
     app = Flask(
         __name__,
@@ -44,10 +66,13 @@ def create_app(midi_box_instance):
     )
     app.config["SECRET_KEY"] = "midi-box-dev"
 
-    def _persist():
-        """Save current routes + state to disk after any change."""
-        _midi_box.state.set_routes(_midi_box.router.dump_routes())
-        _midi_box.state.set_clock_source(_midi_box.router._clock_source)
+    def _state():
+        """Return a snapshot of the shared state dict."""
+        return bridge.state
+
+    def _cmd(action: str, params: dict = None) -> dict:
+        """Send a command to the MIDI process and return the result."""
+        return bridge.send_command(action, params)
 
     # ---------------------------------------------------------------
     # Pages
@@ -87,7 +112,7 @@ def create_app(midi_box_instance):
 
     @app.route("/api/network")
     def api_network():
-        cfg = _midi_box.wifi_config
+        cfg = _state().get("wifi_config", {})
         ip   = cfg.get("ip", "192.168.4.1")
         port = cfg.get("port", 8080)
         return jsonify({
@@ -100,7 +125,7 @@ def create_app(midi_box_instance):
 
     @app.route("/api/qr/<qr_type>.svg")
     def api_qr(qr_type):
-        cfg  = _midi_box.wifi_config
+        cfg  = _state().get("wifi_config", {})
         ip   = cfg.get("ip", "192.168.4.1")
         port = cfg.get("port", 8080)
 
@@ -122,51 +147,23 @@ def create_app(midi_box_instance):
 
     @app.route("/api/devices")
     def api_devices():
-        devices = []
-        for name, dev in _midi_box.registry.get_all_devices().items():
-            activity_in = _midi_box.router.get_activity(name, is_input=True)
-            activity_out = _midi_box.router.get_activity(name, is_input=False)
-            devices.append({
-                "name": name,
-                "port_type": dev.port_type,
-                "direction": dev.direction,
-                "device_type": dev.device_type,
-                "port_id": dev.port_id,
-                "midi_channel": dev.midi_channel,
-                "connected": dev.connected,
-                "activity_in": activity_in.is_active,
-                "activity_out": activity_out.is_active,
-                "msg_count_in": activity_in.message_count,
-                "msg_count_out": activity_out.message_count,
-            })
-        return jsonify({"devices": devices, "mode": _midi_box.mode})
+        st = _state()
+        return jsonify({
+            "devices": list(st.get("devices", [])),
+            "mode": st.get("mode", "standalone"),
+        })
 
     @app.route("/api/devices/<name>/config", methods=["POST"])
     def api_device_config(name):
-        """Update device direction, type, or channel from the UI."""
         data = request.json
-        direction = data.get("direction")
-        device_type = data.get("device_type")
-        midi_channel = data.get("midi_channel")
-
-        ok = _midi_box.registry.update_device_config(
-            name, direction=direction, device_type=device_type,
-            midi_channel=midi_channel,
-        )
-        if not ok:
-            return jsonify({"ok": False, "error": "Device not found"}), 404
-
-        # Persist override to state
-        dev = _midi_box.registry.get_device(name)
-        _midi_box.state.set_device_override(name, {
-            "direction": dev.direction,
-            "device_type": dev.device_type,
-            "midi_channel": dev.midi_channel,
+        result = _cmd("device.config", {
+            "name": name,
+            "direction": data.get("direction"),
+            "device_type": data.get("device_type"),
+            "midi_channel": data.get("midi_channel"),
         })
-        # Update registry overrides cache
-        _midi_box.registry.set_device_overrides(
-            _midi_box.state.get_device_overrides()
-        )
+        if not result.get("ok"):
+            return jsonify({"ok": False, "error": result.get("error", "Device not found")}), 404
         return jsonify({"ok": True})
 
     # ---------------------------------------------------------------
@@ -175,45 +172,37 @@ def create_app(midi_box_instance):
 
     @app.route("/api/routes")
     def api_routes_list():
-        routes = _midi_box.router.dump_routes()
-        return jsonify({"routes": routes})
+        return jsonify({"routes": list(_state().get("routes", []))})
 
     @app.route("/api/routes", methods=["POST"])
     def api_routes_add():
         data = request.json
-        from midi_filter import MidiFilter
-        filt = MidiFilter.from_dict(data.get("filter", {}))
-        route = _midi_box.router.add_route(
-            source=data["from"],
-            destination=data["to"],
-            midi_filter=filt,
-            name=data.get("name", ""),
-        )
-        _persist()
-        return jsonify({"ok": True, "route": route.name})
+        result = _cmd("route.add", {
+            "from": data["from"],
+            "to": data["to"],
+            "filter": data.get("filter", {}),
+            "name": data.get("name", ""),
+        })
+        return jsonify({"ok": result.get("ok", False), "route": result.get("route", "")})
 
     @app.route("/api/routes", methods=["DELETE"])
     def api_routes_remove():
         data = request.json
-        removed = _midi_box.router.remove_route(data["from"], data["to"])
-        _persist()
-        return jsonify({"ok": removed})
+        result = _cmd("route.remove", {"from": data["from"], "to": data["to"]})
+        return jsonify({"ok": result.get("ok", False)})
 
     @app.route("/api/routes/clear", methods=["POST"])
     def api_routes_clear():
-        _midi_box.router.clear_routes()
-        _persist()
-        return jsonify({"ok": True})
+        result = _cmd("route.clear")
+        return jsonify({"ok": result.get("ok", False)})
 
     @app.route("/api/routes/toggle", methods=["POST"])
     def api_routes_toggle():
         data = request.json
-        for route in _midi_box.router.get_all_routes():
-            if route.source == data["from"] and route.destination == data["to"]:
-                route.enabled = not route.enabled
-                _persist()
-                return jsonify({"ok": True, "enabled": route.enabled})
-        return jsonify({"ok": False}), 404
+        result = _cmd("route.toggle", {"from": data["from"], "to": data["to"]})
+        if not result.get("ok"):
+            return jsonify({"ok": False}), 404
+        return jsonify({"ok": True, "enabled": result.get("enabled", False)})
 
     # ---------------------------------------------------------------
     # API: Presets
@@ -221,49 +210,45 @@ def create_app(midi_box_instance):
 
     @app.route("/api/presets")
     def api_presets_list():
-        names = _midi_box.presets.list_presets()
+        st = _state()
         return jsonify({
-            "presets": names,
-            "current": _midi_box.presets.current_preset,
+            "presets": list(st.get("presets", [])),
+            "current": st.get("current_preset", "default"),
         })
 
     @app.route("/api/presets/<name>")
     def api_preset_get(name):
-        data = _midi_box.presets.load(name)
+        # Preset file contents are managed by the MIDI process; we load via command.
+        # Use a lightweight approach: ask for the raw preset data.
+        from preset_manager import PresetManager
+        pm = PresetManager()
+        data = pm.load(name)
         if data:
             return jsonify(data)
         return jsonify({"error": "not found"}), 404
 
     @app.route("/api/presets/<name>/load", methods=["POST"])
     def api_preset_load(name):
-        data = _midi_box.presets.load(name)
-        if not data:
+        result = _cmd("preset.load", {"name": name})
+        if result.get("error") == "not found":
             return jsonify({"error": "not found"}), 404
-        routes = _midi_box.presets.get_routes(data)
-        _midi_box.router.load_routes(routes)
-        clock = _midi_box.presets.get_clock_source(data)
-        _midi_box.router.set_clock_source(clock)
-        _midi_box.state.set_preset(name)
-        _persist()
-        return jsonify({"ok": True, "name": name, "routes": len(routes)})
+        return jsonify(result)
 
     @app.route("/api/presets/save", methods=["POST"])
     def api_preset_save():
         data = request.json
-        name = data.get("name", "custom")
-        preset = {
-            "name": data.get("display_name", name),
+        result = _cmd("preset.save", {
+            "name": data.get("name", "custom"),
+            "display_name": data.get("display_name", data.get("name", "custom")),
             "description": data.get("description", ""),
-            "routes": _midi_box.router.dump_routes(),
             "clock_source": data.get("clock_source"),
-        }
-        ok = _midi_box.presets.save(name, preset)
-        return jsonify({"ok": ok, "name": name})
+        })
+        return jsonify(result)
 
     @app.route("/api/presets/<name>", methods=["DELETE"])
     def api_preset_delete(name):
-        ok = _midi_box.presets.delete(name)
-        return jsonify({"ok": ok})
+        result = _cmd("preset.delete", {"name": name})
+        return jsonify(result)
 
     # ---------------------------------------------------------------
     # API: MIDI Monitor
@@ -271,30 +256,29 @@ def create_app(midi_box_instance):
 
     @app.route("/api/monitor")
     def api_monitor():
-        limit = request.args.get("limit", 100, type=int)
+        limit  = request.args.get("limit", 100, type=int)
         offset = request.args.get("offset", 0, type=int)
-        entries = _midi_box.midi_logger.get_entries(limit=limit, offset=offset)
-        stats = _midi_box.midi_logger.get_stats()
+        st = _state()
+        entries = list(st.get("midi_log", []))
+        # Apply offset/limit (state already stores most-recent-first)
+        sliced = entries[offset:offset + limit]
         return jsonify({
-            "entries": entries,
-            "stats": stats,
-            "paused": _midi_box.midi_logger.is_paused,
+            "entries": sliced,
+            "stats": dict(st.get("midi_stats", {})),
+            "paused": st.get("midi_paused", False),
         })
 
     @app.route("/api/monitor/clear", methods=["POST"])
     def api_monitor_clear():
-        _midi_box.midi_logger.clear()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("monitor.clear"))
 
     @app.route("/api/monitor/pause", methods=["POST"])
     def api_monitor_pause():
-        _midi_box.midi_logger.pause()
-        return jsonify({"ok": True, "paused": True})
+        return jsonify(_cmd("monitor.pause"))
 
     @app.route("/api/monitor/resume", methods=["POST"])
     def api_monitor_resume():
-        _midi_box.midi_logger.resume()
-        return jsonify({"ok": True, "paused": False})
+        return jsonify(_cmd("monitor.resume"))
 
     # ---------------------------------------------------------------
     # API: Settings
@@ -302,41 +286,28 @@ def create_app(midi_box_instance):
 
     @app.route("/api/settings")
     def api_settings():
+        st = _state()
+        routes = list(st.get("routes", []))
+        devices = list(st.get("devices", []))
         return jsonify({
-            "mode": _midi_box.mode,
-            "platform": _midi_box.platform,
-            "preset": _midi_box.presets.current_preset,
-            "total_routes": len(_midi_box.router.get_all_routes()),
-            "total_devices": len(_midi_box.registry.get_all_devices()),
-            "clock_source": _midi_box.router._clock_source,
+            "mode": st.get("mode", "standalone"),
+            "platform": st.get("platform", "unknown"),
+            "preset": st.get("current_preset", "default"),
+            "total_routes": len(routes),
+            "total_devices": len(devices),
+            "clock_source": st.get("clock_source"),
         })
 
     @app.route("/api/settings/clock", methods=["POST"])
     def api_settings_clock():
         data = request.json
-        _midi_box.router.set_clock_source(data.get("source"))
-        _persist()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("settings.clock", {"source": data.get("source")}))
 
     @app.route("/api/settings/rescan", methods=["POST"])
     def api_settings_rescan():
-        """Force rescan of MIDI devices — close all and reopen."""
-        # Clear USB devices from registry (keep hardware)
-        usb_names = [
-            name for name, d in _midi_box.registry.get_all_devices().items()
-            if d.port_type == "usb"
-        ]
-        for name in usb_names:
-            _midi_box.registry.unregister_device(name)
-
-        # Full rescan
-        ports = _midi_box.alsa.rescan()
-        for port in ports:
-            _midi_box.registry.register_usb_device(port.port_name, port.port_name)
-
-        devices = list(_midi_box.registry.get_all_devices().keys())
-        logger.info(f"Rescan complete: {len(devices)} devices")
-        return jsonify({"ok": True, "devices": devices})
+        result = _cmd("device.rescan")
+        logger.info(f"Rescan complete: {len(result.get('devices', []))} devices")
+        return jsonify(result)
 
     # ---------------------------------------------------------------
     # API: Clip Launcher
@@ -344,113 +315,89 @@ def create_app(midi_box_instance):
 
     @app.route("/api/launcher")
     def api_launcher_status():
-        status = _midi_box.launcher.get_status()
-        status["files"] = _midi_box.launcher.list_files()
-        return jsonify(status)
+        return jsonify(dict(_state().get("launcher", {})))
 
     @app.route("/api/launcher/poll")
     def api_launcher_poll():
-        return jsonify(_midi_box.launcher.get_poll())
+        return jsonify(dict(_state().get("launcher_poll", {})))
 
     @app.route("/api/launcher/clock", methods=["POST"])
     def api_launcher_clock():
         data = request.json
-        if "mode" in data:
-            _midi_box.launcher.set_clock_mode(data["mode"])
-        if "bpm" in data:
-            _midi_box.launcher.set_bpm(float(data["bpm"]))
-        if "quantum" in data:
-            _midi_box.launcher.set_quantum(data["quantum"])
-        if "beats_per_bar" in data:
-            _midi_box.launcher.set_beats_per_bar(int(data["beats_per_bar"]))
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.clock", data))
 
     @app.route("/api/launcher/transport/start", methods=["POST"])
     def api_launcher_start():
-        _midi_box.launcher.transport_start()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.start"))
 
     @app.route("/api/launcher/transport/stop", methods=["POST"])
     def api_launcher_stop_transport():
-        _midi_box.launcher.transport_stop()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.stop"))
 
     @app.route("/api/launcher/layers", methods=["POST"])
     def api_launcher_add_layer():
         data = request.json
-        layer = _midi_box.launcher.add_layer(
-            name=data.get("name", ""),
-            destination=data.get("destination", ""),
-            midi_channel=data.get("midi_channel"),
-        )
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": True, "layer_id": layer.layer_id})
+        return jsonify(_cmd("launcher.add_layer", {
+            "name": data.get("name", ""),
+            "destination": data.get("destination", ""),
+            "midi_channel": data.get("midi_channel"),
+        }))
 
     @app.route("/api/launcher/layers/<int:layer_id>", methods=["DELETE"])
     def api_launcher_remove_layer(layer_id):
-        ok = _midi_box.launcher.remove_layer(layer_id)
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("launcher.remove_layer", {"layer_id": layer_id}))
 
     @app.route("/api/launcher/layers/<int:layer_id>", methods=["PATCH"])
     def api_launcher_update_layer(layer_id):
         data = request.json
-        _midi_box.launcher.update_layer(
-            layer_id,
-            name=data.get("name"),
-            destination=data.get("destination"),
-            midi_channel=data.get("midi_channel"),
-        )
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.update_layer", {
+            "layer_id": layer_id,
+            "name": data.get("name"),
+            "destination": data.get("destination"),
+            "midi_channel": data.get("midi_channel"),
+        }))
 
     @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>", methods=["POST"])
     def api_launcher_assign_clip(layer_id, slot):
         data = request.json
-        ok = _midi_box.launcher.assign_clip(
-            layer_id, slot,
-            filename=data.get("filename", ""),
-            name=data.get("name", ""),
-            loop=data.get("loop", True),
-        )
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("launcher.assign_clip", {
+            "layer_id": layer_id,
+            "slot": slot,
+            "filename": data.get("filename", ""),
+            "name": data.get("name", ""),
+            "loop": data.get("loop", True),
+        }))
 
     @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>", methods=["DELETE"])
     def api_launcher_remove_clip(layer_id, slot):
-        ok = _midi_box.launcher.remove_clip(layer_id, slot)
-        _midi_box.state.set_launcher_state(_midi_box.launcher.save_state())
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("launcher.remove_clip", {"layer_id": layer_id, "slot": slot}))
 
     @app.route("/api/launcher/layers/<int:layer_id>/clips/<int:slot>/launch", methods=["POST"])
     def api_launcher_launch_clip(layer_id, slot):
-        _midi_box.launcher.launch_clip(layer_id, slot)
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.launch_clip", {"layer_id": layer_id, "slot": slot}))
 
     @app.route("/api/launcher/layers/<int:layer_id>/stop", methods=["POST"])
     def api_launcher_stop_layer(layer_id):
-        _midi_box.launcher.stop_layer(layer_id)
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.stop_layer", {"layer_id": layer_id}))
 
     @app.route("/api/launcher/stop_all", methods=["POST"])
     def api_launcher_stop_all():
-        _midi_box.launcher.stop_all()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("launcher.stop_all"))
 
     @app.route("/api/launcher/upload", methods=["POST"])
     def api_launcher_upload():
         file = request.files.get("file")
         if not file or not file.filename:
             return jsonify({"ok": False, "error": "No file"}), 400
-        ok = _midi_box.launcher.upload(file.filename, file.read())
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("launcher.upload", {
+            "filename": file.filename,
+            "data": file.read(),
+        }))
 
     @app.route("/api/launcher/files/delete", methods=["POST"])
     def api_launcher_delete_file():
         data = request.json
-        ok = _midi_box.launcher.delete_file(data.get("file", ""))
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("launcher.delete_file", {"file": data.get("file", "")}))
 
     # ---------------------------------------------------------------
     # API: MIDI Player
@@ -458,19 +405,17 @@ def create_app(midi_box_instance):
 
     @app.route("/api/player")
     def api_player_status():
-        return jsonify({
-            "status": _midi_box.player.status,
-            "files": _midi_box.player.list_files(),
-        })
+        return jsonify(dict(_state().get("player", {"status": {}, "files": []})))
 
     @app.route("/api/player/upload", methods=["POST"])
     def api_player_upload():
         file = request.files.get("file")
         if not file or not file.filename:
             return jsonify({"ok": False, "error": "No file"}), 400
-        data = file.read()
-        ok = _midi_box.player.upload(file.filename, data)
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("player.upload", {
+            "filename": file.filename,
+            "data": file.read(),
+        }))
 
     @app.route("/api/player/play", methods=["POST"])
     def api_player_play():
@@ -479,45 +424,39 @@ def create_app(midi_box_instance):
         destination = data.get("destination")
         if not filename or not destination:
             return jsonify({"ok": False, "error": "file and destination required"}), 400
-        ok = _midi_box.player.play(
-            filename, destination,
-            loop=data.get("loop", False),
-            tempo_factor=data.get("tempo", 1.0),
-        )
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("player.play", {
+            "file": filename,
+            "destination": destination,
+            "loop": data.get("loop", False),
+            "tempo": data.get("tempo", 1.0),
+        }))
 
     @app.route("/api/player/stop", methods=["POST"])
     def api_player_stop():
-        _midi_box.player.stop()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("player.stop"))
 
     @app.route("/api/player/pause", methods=["POST"])
     def api_player_pause():
-        _midi_box.player.pause()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("player.pause"))
 
     @app.route("/api/player/resume", methods=["POST"])
     def api_player_resume():
-        _midi_box.player.resume()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("player.resume"))
 
     @app.route("/api/player/loop", methods=["POST"])
     def api_player_loop():
         data = request.json
-        _midi_box.player.set_loop(data.get("loop", False))
-        return jsonify({"ok": True})
+        return jsonify(_cmd("player.set_loop", {"loop": data.get("loop", False)}))
 
     @app.route("/api/player/tempo", methods=["POST"])
     def api_player_tempo():
         data = request.json
-        _midi_box.player.set_tempo(data.get("tempo", 1.0))
-        return jsonify({"ok": True})
+        return jsonify(_cmd("player.set_tempo", {"tempo": data.get("tempo", 1.0)}))
 
     @app.route("/api/player/delete", methods=["POST"])
     def api_player_delete():
         data = request.json
-        ok = _midi_box.player.delete(data.get("file", ""))
-        return jsonify({"ok": ok})
+        return jsonify(_cmd("player.delete", {"file": data.get("file", "")}))
 
     # ---------------------------------------------------------------
     # API: Application Logs
@@ -526,13 +465,12 @@ def create_app(midi_box_instance):
     @app.route("/api/logs")
     def api_logs():
         limit = request.args.get("limit", 200, type=int)
-        entries = _midi_box.log_buffer.get_entries(limit)
+        entries = list(_state().get("log_entries", []))[:limit]
         return jsonify({"entries": entries})
 
     @app.route("/api/logs/clear", methods=["POST"])
     def api_logs_clear():
-        _midi_box.log_buffer.clear()
-        return jsonify({"ok": True})
+        return jsonify(_cmd("logs.clear"))
 
     # ---------------------------------------------------------------
     # API: Polling endpoint for real-time updates
@@ -541,21 +479,11 @@ def create_app(midi_box_instance):
     @app.route("/api/poll")
     def api_poll():
         """Lightweight endpoint for UI polling — returns activity + stats."""
-        devices = []
-        for name, dev in _midi_box.registry.get_all_devices().items():
-            a_in = _midi_box.router.get_activity(name, is_input=True)
-            a_out = _midi_box.router.get_activity(name, is_input=False)
-            devices.append({
-                "name": name,
-                "active_in": a_in.is_active,
-                "active_out": a_out.is_active,
-                "count_in": a_in.message_count,
-                "count_out": a_out.message_count,
-            })
+        st = _state()
         return jsonify({
-            "devices": devices,
-            "mode": _midi_box.mode,
-            "preset": _midi_box.presets.current_preset,
+            "devices": list(st.get("activity", [])),
+            "mode": st.get("mode", "standalone"),
+            "preset": st.get("current_preset", "default"),
         })
 
     # ---------------------------------------------------------------
@@ -565,7 +493,8 @@ def create_app(midi_box_instance):
     @app.route("/api/export")
     def api_export():
         """Export full state as downloadable JSON file."""
-        data = _midi_box.state.export_all()
+        result = _cmd("state.export")
+        data = result.get("data", {})
         return Response(
             json.dumps(data, indent=2),
             mimetype="application/json",
@@ -575,7 +504,6 @@ def create_app(midi_box_instance):
     @app.route("/api/import", methods=["POST"])
     def api_import():
         """Import state from uploaded JSON."""
-        # Accept either file upload or JSON body
         if request.content_type and "multipart" in request.content_type:
             file = request.files.get("file")
             if not file:
@@ -589,24 +517,14 @@ def create_app(midi_box_instance):
             if not data:
                 return jsonify({"ok": False, "error": "No data provided"}), 400
 
-        ok = _midi_box.state.import_all(data)
-        if ok:
-            # Reload routes from imported state
-            routes = _midi_box.state.get_routes()
-            _midi_box.router.load_routes(routes)
-            clock = _midi_box.state.get_clock_source()
-            _midi_box.router.set_clock_source(clock)
-            _midi_box.presets.current_preset = _midi_box.state.get_preset()
-            return jsonify({"ok": True, "routes": len(routes)})
+        result = _cmd("state.import", {"data": data})
+        if result.get("ok"):
+            return jsonify(result)
         return jsonify({"ok": False, "error": "Import failed"}), 400
 
     @app.route("/api/state/reset", methods=["POST"])
     def api_state_reset():
-        """Reset state to defaults."""
-        _midi_box.state.reset()
-        _midi_box.router.clear_routes()
-        _midi_box.presets.current_preset = None
-        return jsonify({"ok": True})
+        return jsonify(_cmd("state.reset"))
 
     # ---------------------------------------------------------------
     # API: System stats + service restart
@@ -614,10 +532,12 @@ def create_app(midi_box_instance):
 
     @app.route("/api/system")
     def api_system():
+        st = _state()
         stats = {
             "cpu_percent": 0, "ram_used_mb": 0, "ram_total_mb": 0, "ram_percent": 0,
             "disk_used_gb": 0.0, "disk_total_gb": 0.0, "disk_percent": 0,
-            "cpu_temp_c": None, "uptime_seconds": 0, "platform": _midi_box.platform,
+            "cpu_temp_c": None, "uptime_seconds": 0,
+            "platform": st.get("platform", "unknown"),
         }
         try:
             import psutil
@@ -635,7 +555,6 @@ def create_app(midi_box_instance):
                 "uptime_seconds": int(time.time() - psutil.boot_time()),
             })
         except ImportError:
-            # Fallback: read /proc directly (Linux only)
             try:
                 import shutil
                 total, used, _ = shutil.disk_usage("/")
@@ -675,17 +594,8 @@ def create_app(midi_box_instance):
 
     @app.route("/api/system/restart", methods=["POST"])
     def api_system_restart():
-        """Restart the MIDI Box service via SIGTERM — systemd will bring it back up."""
-        import os
-        import signal as _signal
-        import threading
-
-        def _kill():
-            time.sleep(0.4)   # let Flask finish sending the response
-            os.kill(os.getpid(), _signal.SIGTERM)
-
-        threading.Thread(target=_kill, daemon=True).start()
-        return jsonify({"ok": True, "message": "Restarting service..."})
+        """Restart the MIDI Box service — sends SIGTERM to MIDI engine process."""
+        return jsonify(_cmd("system.restart"))
 
     def _make_qr_svg(data: str) -> Response:
         try:
@@ -719,7 +629,7 @@ def create_app(midi_box_instance):
 
 
 class LogBuffer:
-    """Captures Python logging output for the web UI."""
+    """Captures Python logging output for the MIDI engine process."""
 
     def __init__(self, max_entries=500):
         self._entries = []
