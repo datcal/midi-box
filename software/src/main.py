@@ -91,12 +91,13 @@ class MidiBox:
         # Register the send callback
         self.router.set_send_callback(self._send_midi)
 
-        # Open USB MIDI devices (works on both Mac and Pi)
-        self._init_usb_midi()
-
-        # Open hardware MIDI ports (Pi only)
-        if self.platform == "pi":
-            self._init_hardware_midi()
+        # Open MIDI devices (real or mock)
+        if self.args.mock:
+            self._init_mock_devices()
+        else:
+            self._init_usb_midi()
+            if self.platform == "pi":
+                self._init_hardware_midi()
 
         # If DAW mode on Pi, set up USB gadget bridge
         if self.mode == "daw" and self.platform == "pi":
@@ -105,8 +106,9 @@ class MidiBox:
         # Restore routes from saved state, or fall back to preset
         self._restore_state()
 
-        # Start hotplug monitor for USB devices
-        self.alsa.start_hotplug_monitor()
+        # Start hotplug monitor for USB devices (skip in mock mode)
+        if not self.args.mock:
+            self.alsa.start_hotplug_monitor()
 
         # Start hardware MIDI read thread (Pi only)
         if self.hw:
@@ -166,6 +168,25 @@ class MidiBox:
                 logger.info(f"  USB: {device.name}")
         if not ports:
             logger.info("  No USB MIDI devices found")
+
+    def _init_mock_devices(self):
+        """Register all devices from config as fake connected devices (no hardware needed)."""
+        logger.info("Mock mode: loading all configured devices as virtual...")
+        names = []
+
+        for vendor_product, info in self.registry.usb_devices.items():
+            name = info["name"]
+            self.registry.register_usb_device(name, name, vendor_product)
+            names.append(name)
+            logger.info(f"  MOCK USB: {name}")
+
+        for port_key in self.registry.hardware_ports:
+            device = self.registry.register_hardware_device(f"/dev/{port_key}")
+            if device:
+                names.append(device.name)
+                logger.info(f"  MOCK HW:  {device.name}")
+
+        self.alsa.open_mock_devices(names)
 
     def _init_hardware_midi(self):
         """Open hardware MIDI ports (Pi only)."""
@@ -336,6 +357,10 @@ def main():
     parser.add_argument(
         "--port", default=8080, type=int,
         help="Web UI port (default: 8080)",
+    )
+    parser.add_argument(
+        "--mock", action="store_true",
+        help="Use virtual devices from config (no hardware required)",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true",

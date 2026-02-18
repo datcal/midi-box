@@ -254,59 +254,107 @@ body {
 .activity-dot.active-in { background: var(--midi-in); box-shadow: 0 0 6px var(--midi-in); }
 .activity-dot.active-out { background: var(--midi-out); box-shadow: 0 0 6px var(--midi-out); }
 
-/* --- Routing Matrix --- */
+/* --- Patchbay Routing --- */
 
-.routing-matrix {
-  overflow-x: auto;
+.patchbay {
+  display: grid;
+  grid-template-columns: 1fr 40px 1fr;
+  gap: 0;
+  align-items: start;
 }
 
-.routing-matrix table {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.routing-matrix th,
-.routing-matrix td {
-  padding: 8px 10px;
-  text-align: center;
+.patchbay-col {
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  font-size: 12px;
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
-.routing-matrix th {
+.patchbay-col-header {
+  padding: 12px 16px;
   background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
   color: var(--text-secondary);
-  font-weight: 600;
-  white-space: nowrap;
 }
 
-.routing-matrix th.row-header {
-  text-align: left;
-  min-width: 140px;
+.patchbay-divider {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 56px;
+  font-size: 22px;
+  color: var(--accent);
 }
 
-.routing-matrix td.cell {
+.patchbay-dests-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.pb-device {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   cursor: pointer;
   transition: background 0.15s;
-  width: 44px;
-  height: 44px;
+  user-select: none;
+  -webkit-user-select: none;
+  min-height: 76px;
 }
 
-.routing-matrix td.cell:hover { background: var(--bg-hover); }
+.patchbay-col > div > .pb-device:last-child,
+.pb-device:nth-last-child(-n+2):nth-child(odd):last-child { border-bottom: none; }
 
-.routing-matrix td.cell.routed {
+.pb-device:hover { background: var(--bg-hover); }
+
+.pb-device.pb-selected {
   background: var(--accent-dim);
-  color: var(--accent);
+  border-left: 3px solid var(--accent);
+}
+
+.pb-device.pb-connected {
+  background: rgba(46, 204, 113, 0.08);
+  border-left: 3px solid var(--success);
+}
+
+.pb-device.pb-tappable.pb-connected:hover { background: var(--danger-dim); }
+
+.pb-badge {
+  font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-bottom: 5px;
 }
 
-.routing-matrix td.cell.routed:hover {
-  background: var(--danger-dim);
+.pb-badge-src { color: var(--accent); }
+.pb-badge-ok  { color: var(--success); }
+
+.pb-device-name {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 3px;
 }
 
-.routing-matrix td.cell.self {
-  background: var(--bg-primary);
-  cursor: default;
+.pb-device-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pb-device-routes {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 4px;
+}
+
+.pb-empty {
+  padding: 28px 16px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 13px;
 }
 
 /* --- Route list --- */
@@ -560,4 +608,19 @@ body {
   .sidebar-header .mode-badge { display: none; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .device-list { grid-template-columns: 1fr; }
+
+  /* Patchbay stacks vertically on small screens */
+  .patchbay { grid-template-columns: 1fr; }
+  .patchbay-divider { padding-top: 8px; padding-bottom: 8px; font-size: 20px; transform: rotate(90deg); }
+  .patchbay-dests-grid { grid-template-columns: 1fr 1fr; }
+  .pb-device { min-height: 84px; padding: 18px 16px; }
+  .pb-device-name { font-size: 15px; }
+}
+
+/* Touch devices — larger tap targets */
+@media (pointer: coarse) {
+  .pb-device { min-height: 88px; padding: 18px; }
+  .pb-device-name { font-size: 15px; }
+  .btn { padding: 10px 18px; font-size: 13px; }
+  .btn-sm { padding: 8px 14px; font-size: 12px; }
 }

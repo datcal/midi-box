@@ -13,6 +13,14 @@ import mido
 logger = logging.getLogger("midi-box.alsa")
 
 
+class _MockPort:
+    """Null MIDI port used in --mock mode (no hardware required)."""
+    def send(self, msg): pass
+    def poll(self): return None
+    def iter_pending(self): return iter([])
+    def close(self): pass
+
+
 @dataclass
 class AlsaPort:
     name: str
@@ -177,6 +185,21 @@ class AlsaMidi:
                     port.output_port.close()
             except Exception as e:
                 logger.debug(f"Error closing {port_name}: {e}")
+
+    def open_mock_devices(self, names: list[str]) -> list[AlsaPort]:
+        """Create fake ports for all names (--mock mode, no hardware needed)."""
+        ports = []
+        for name in names:
+            port = AlsaPort(
+                name=name,
+                port_name=name,
+                input_port=_MockPort(),
+                output_port=_MockPort(),
+            )
+            self.ports[name] = port
+            ports.append(port)
+        logger.info(f"Mock mode: {len(ports)} virtual devices created")
+        return ports
 
     def close_all(self):
         """Close all open ports."""

@@ -78,22 +78,25 @@
     <div class="page" id="page-routing">
       <div class="page-header">
         <h2>Routing</h2>
-        <p>Click cells to create or remove routes between devices</p>
+        <p id="routing-hint">Tap a source to select it, then tap destinations to connect</p>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h3>Routing Matrix</h3>
-          <div class="btn-group">
-            <button class="btn btn-sm btn-danger" onclick="clearAllRoutes()">Clear All</button>
-          </div>
+      <div class="patchbay">
+        <div class="patchbay-col">
+          <div class="patchbay-col-header">&#9000; Sources</div>
+          <div id="patchbay-sources"></div>
         </div>
-        <div class="routing-matrix" id="routing-matrix"></div>
+        <div class="patchbay-divider">&#8644;</div>
+        <div class="patchbay-col">
+          <div class="patchbay-col-header">&#9836; Destinations</div>
+          <div id="patchbay-dests" class="patchbay-dests-grid"></div>
+        </div>
       </div>
 
-      <div class="card">
+      <div class="card" style="margin-top:16px;">
         <div class="card-header">
           <h3>Active Routes</h3>
+          <button class="btn btn-sm btn-danger" onclick="clearAllRoutes()">Clear All</button>
         </div>
         <ul class="route-list" id="route-list"></ul>
       </div>

@@ -109,6 +109,7 @@ async function rescanDevices() {
 // --- Routing ---
 
 let pendingFilterRoute = null;
+let selectedSource = null;
 
 async function loadRouting() {
   const [devData, routeData] = await Promise.all([
@@ -118,52 +119,98 @@ async function loadRouting() {
   devices = devData.devices;
   routes = routeData.routes;
 
-  renderRoutingMatrix();
+  renderPatchbay();
   renderRouteList();
 }
 
-function renderRoutingMatrix() {
-  const inputDevs = devices.filter(d => d.direction === 'both' || d.direction === 'in');
-  const outputDevs = devices.filter(d => d.direction === 'both' || d.direction === 'out');
+function renderPatchbay() {
+  const sources = devices.filter(d => d.direction === 'both' || d.direction === 'in');
+  const dests   = devices.filter(d => d.direction === 'both' || d.direction === 'out');
 
-  if (inputDevs.length === 0 || outputDevs.length === 0) {
-    document.getElementById('routing-matrix').innerHTML =
-      '<div style="padding:20px; color:var(--text-muted); text-align:center;">No devices available for routing.</div>';
-    return;
+  // Build route map: from -> Set of tos
+  const routeMap = {};
+  routes.forEach(r => {
+    if (!routeMap[r.from]) routeMap[r.from] = new Set();
+    routeMap[r.from].add(r.to);
+  });
+
+  // Validate selected source still exists
+  if (selectedSource && !sources.find(d => d.name === selectedSource)) {
+    selectedSource = null;
   }
 
-  // Build route lookup
-  const routeSet = new Set(routes.map(r => `${r.from}|${r.to}`));
+  // --- Sources ---
+  const sourcesEl = document.getElementById('patchbay-sources');
+  if (sources.length === 0) {
+    sourcesEl.innerHTML = '<div class="pb-empty">No source devices found</div>';
+  } else {
+    sourcesEl.innerHTML = sources.map(d => {
+      const isSelected = selectedSource === d.name;
+      const connected  = routeMap[d.name] ? [...routeMap[d.name]] : [];
+      const chLabel    = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
+      return `
+        <div class="pb-device ${isSelected ? 'pb-selected' : ''}"
+             onclick="selectSource('${esc(d.name)}')">
+          ${isSelected ? '<div class="pb-badge pb-badge-src">SELECTED</div>' : ''}
+          <div class="pb-device-name">${esc(d.name)}</div>
+          <div class="pb-device-meta">${chLabel} &middot; ${d.port_type.toUpperCase()}</div>
+          ${connected.length
+            ? `<div class="pb-device-routes">&#8594; ${connected.map(esc).join(', ')}</div>`
+            : ''}
+        </div>`;
+    }).join('');
+  }
 
-  let html = '<table><thead><tr><th class="row-header">FROM \\ TO</th>';
-  outputDevs.forEach(d => {
-    html += `<th title="${esc(d.name)}">${esc(shortName(d.name))}</th>`;
-  });
-  html += '</tr></thead><tbody>';
+  // --- Destinations ---
+  const destsEl = document.getElementById('patchbay-dests');
+  const activeSet = (selectedSource && routeMap[selectedSource]) ? routeMap[selectedSource] : new Set();
+  const canTap = !!selectedSource;
 
-  inputDevs.forEach(src => {
-    html += `<tr><th class="row-header">${esc(src.name)}</th>`;
-    outputDevs.forEach(dst => {
-      const key = `${src.name}|${dst.name}`;
-      const isSelf = src.name === dst.name;
-      const isRouted = routeSet.has(key);
+  if (dests.length === 0) {
+    destsEl.innerHTML = '<div class="pb-empty">No destination devices found</div>';
+  } else {
+    destsEl.innerHTML = dests.map(d => {
+      if (d.name === selectedSource) return ''; // skip self-route
+      const isConnected = activeSet.has(d.name);
+      const chLabel     = d.midi_channel ? `ch ${d.midi_channel}` : 'all ch';
+      return `
+        <div class="pb-device ${isConnected ? 'pb-connected' : ''} ${canTap ? 'pb-tappable' : ''}"
+             onclick="${canTap ? `toggleRoutePatchbay('${esc(d.name)}',${isConnected})` : ''}">
+          ${isConnected ? '<div class="pb-badge pb-badge-ok">&#10003; ROUTED</div>' : ''}
+          <div class="pb-device-name">${esc(d.name)}</div>
+          <div class="pb-device-meta">${chLabel} &middot; ${d.port_type.toUpperCase()}</div>
+          ${isConnected
+            ? `<button class="btn btn-sm" style="margin-top:8px;"
+                       onclick="event.stopPropagation(); editRouteFilter(null,'${esc(selectedSource)}','${esc(d.name)}')">Filter / Channel</button>`
+            : ''}
+        </div>`;
+    }).join('');
+  }
 
-      if (isSelf) {
-        html += '<td class="cell self">&mdash;</td>';
-      } else {
-        html += `<td class="cell ${isRouted ? 'routed' : ''}"
-                     onclick="toggleRoute('${esc(src.name)}','${esc(dst.name)}',${isRouted})"
-                     oncontextmenu="editRouteFilter(event,'${esc(src.name)}','${esc(dst.name)}')"
-                     title="${esc(src.name)} &rarr; ${esc(dst.name)}">
-                   ${isRouted ? '&#10003;' : ''}
-                 </td>`;
-      }
-    });
-    html += '</tr>';
-  });
+  // Update hint text
+  const hint = document.getElementById('routing-hint');
+  if (selectedSource) {
+    hint.textContent = `Source: ${selectedSource} — tap a destination to connect or disconnect`;
+    hint.style.color = 'var(--accent)';
+  } else {
+    hint.textContent = 'Tap a source to select it, then tap destinations to connect';
+    hint.style.color = '';
+  }
+}
 
-  html += '</tbody></table>';
-  document.getElementById('routing-matrix').innerHTML = html;
+function selectSource(name) {
+  selectedSource = (selectedSource === name) ? null : name;
+  renderPatchbay();
+}
+
+async function toggleRoutePatchbay(to, isConnected) {
+  if (!selectedSource) return;
+  if (isConnected) {
+    await api('/routes', { method: 'DELETE', body: { from: selectedSource, to } });
+  } else {
+    await api('/routes', { method: 'POST', body: { from: selectedSource, to, filter: {} } });
+  }
+  await loadRouting();
 }
 
 function renderRouteList() {
@@ -194,15 +241,6 @@ function renderRouteList() {
   }).join('');
 }
 
-async function toggleRoute(from, to, isRouted) {
-  if (isRouted) {
-    await api('/routes', { method: 'DELETE', body: { from, to } });
-  } else {
-    await api('/routes', { method: 'POST', body: { from, to, filter: {} } });
-  }
-  loadRouting();
-}
-
 async function removeRoute(from, to) {
   await api('/routes', { method: 'DELETE', body: { from, to } });
   loadRouting();
@@ -215,6 +253,7 @@ async function toggleRouteEnabled(from, to) {
 
 async function clearAllRoutes() {
   if (!confirm('Clear all routes?')) return;
+  selectedSource = null;
   await api('/routes/clear', { method: 'POST' });
   loadRouting();
 }
