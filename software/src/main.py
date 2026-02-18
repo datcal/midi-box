@@ -341,8 +341,13 @@ class MidiBox:
             for port_name in self.alsa.get_input_ports():
                 msg = self.alsa.receive(port_name)
                 if msg:
-                    self.midi_logger.log_input(port_name, msg)
-                    self.router.process_message(port_name, msg)
+                    # Translate raw ALSA port name → friendly device name.
+                    # Routes are keyed by friendly name (e.g. "LPK25"), but
+                    # ALSA ports are keyed by raw name (e.g. "LPK25 MIDI 1").
+                    device = self.registry.find_by_port_id(port_name)
+                    source_name = device.name if device else port_name
+                    self.midi_logger.log_input(source_name, msg)
+                    self.router.process_message(source_name, msg)
 
             # Read from USB gadget (Mac → Pi)
             if self.gadget and self.mode == "daw":
