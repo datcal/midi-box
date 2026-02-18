@@ -45,6 +45,7 @@ function loadPageData(page) {
     case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
+    case 'system': startSystem(); break;
   }
 }
 
@@ -1137,6 +1138,121 @@ function esc(str) {
   const d = document.createElement('div');
   d.textContent = str;
   return d.innerHTML;
+}
+
+// --- System page ---
+
+let systemInterval = null;
+
+function startSystem() {
+  refreshSystem();
+  if (systemInterval) clearInterval(systemInterval);
+  systemInterval = setInterval(() => {
+    if (currentPage !== 'system') { clearInterval(systemInterval); systemInterval = null; return; }
+    refreshSystem();
+  }, 3000);
+}
+
+async function refreshSystem() {
+  let data;
+  try { data = await api('/system'); } catch (_) { return; }
+
+  // CPU bar
+  setBar('sys-cpu-bar', data.cpu_percent);
+  document.getElementById('sys-cpu-val').textContent = data.cpu_percent + '%';
+  document.getElementById('sys-cpu-bar').style.background =
+    data.cpu_percent > 85 ? 'var(--danger)' : data.cpu_percent > 60 ? 'var(--warning)' : 'var(--accent)';
+
+  // RAM bar
+  setBar('sys-ram-bar', data.ram_percent);
+  document.getElementById('sys-ram-val').textContent =
+    data.ram_used_mb + ' MB / ' + data.ram_total_mb + ' MB (' + data.ram_percent + '%)';
+
+  // Disk bar
+  setBar('sys-disk-bar', data.disk_percent);
+  document.getElementById('sys-disk-val').textContent =
+    data.disk_used_gb + ' GB / ' + data.disk_total_gb + ' GB (' + data.disk_percent + '%)';
+
+  // Temperature
+  const tempEl = document.getElementById('sys-temp');
+  if (data.cpu_temp_c !== null && data.cpu_temp_c !== undefined) {
+    tempEl.textContent = data.cpu_temp_c + ' °C';
+    tempEl.style.color = data.cpu_temp_c > 75 ? 'var(--danger)' : data.cpu_temp_c > 60 ? 'var(--warning)' : 'var(--success)';
+  } else {
+    tempEl.textContent = 'N/A';
+    tempEl.style.color = 'var(--text-muted)';
+  }
+
+  // Uptime
+  document.getElementById('sys-uptime').textContent = fmtUptime(data.uptime_seconds);
+
+  // Platform
+  document.getElementById('sys-platform').textContent = data.platform || '—';
+}
+
+function setBar(id, pct) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = Math.min(100, Math.max(0, pct)) + '%';
+}
+
+function fmtUptime(seconds) {
+  if (!seconds) return '—';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const parts = [];
+  if (d) parts.push(d + 'd');
+  if (h) parts.push(h + 'h');
+  parts.push(m + 'm');
+  return parts.join(' ');
+}
+
+// --- Panic / restart ---
+
+async function panicRestart() {
+  const btn    = document.getElementById('panic-btn');
+  const status = document.getElementById('panic-status');
+  const sysStatus = document.getElementById('sys-restart-status');
+
+  const setState = (text, color) => {
+    if (btn)       { btn.textContent = text; btn.style.background = color; btn.disabled = true; }
+    if (status)    { status.textContent = text; status.style.color = color; }
+    if (sysStatus) { sysStatus.textContent = text; sysStatus.style.color = color; }
+  };
+
+  setState('Restarting…', 'var(--warning)');
+
+  try {
+    await fetch('/api/system/restart', { method: 'POST' });
+  } catch (_) { /* expected — server dies */ }
+
+  // Wait for server to go down, then poll until it comes back
+  await new Promise(r => setTimeout(r, 3000));
+  setState('Reconnecting…', 'var(--warning)');
+
+  let attempts = 0;
+  const poll = setInterval(async () => {
+    attempts++;
+    try {
+      const r = await fetch('/api/settings');
+      if (r.ok) {
+        clearInterval(poll);
+        setState('Back online!', 'var(--success)');
+        setTimeout(() => {
+          if (btn) { btn.textContent = '\u25A0 PANIC'; btn.style.background = ''; btn.disabled = false; }
+          if (status) status.textContent = '';
+          if (sysStatus) sysStatus.textContent = '';
+          location.reload();
+        }, 1200);
+      }
+    } catch (_) {
+      if (attempts > 40) {  // 20s timeout
+        clearInterval(poll);
+        setState('Timeout — check Pi', 'var(--danger)');
+        if (btn) btn.disabled = false;
+      }
+    }
+  }, 500);
 }
 
 // --- Polling for activity updates (dashboard) ---

@@ -608,6 +608,85 @@ def create_app(midi_box_instance):
         _midi_box.presets.current_preset = None
         return jsonify({"ok": True})
 
+    # ---------------------------------------------------------------
+    # API: System stats + service restart
+    # ---------------------------------------------------------------
+
+    @app.route("/api/system")
+    def api_system():
+        stats = {
+            "cpu_percent": 0, "ram_used_mb": 0, "ram_total_mb": 0, "ram_percent": 0,
+            "disk_used_gb": 0.0, "disk_total_gb": 0.0, "disk_percent": 0,
+            "cpu_temp_c": None, "uptime_seconds": 0, "platform": _midi_box.platform,
+        }
+        try:
+            import psutil
+            cpu = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            stats.update({
+                "cpu_percent":  round(cpu, 1),
+                "ram_used_mb":  mem.used  // (1024 * 1024),
+                "ram_total_mb": mem.total // (1024 * 1024),
+                "ram_percent":  round(mem.percent, 1),
+                "disk_used_gb":  round(disk.used  / 1024**3, 1),
+                "disk_total_gb": round(disk.total / 1024**3, 1),
+                "disk_percent":  round(disk.percent, 1),
+                "uptime_seconds": int(time.time() - psutil.boot_time()),
+            })
+        except ImportError:
+            # Fallback: read /proc directly (Linux only)
+            try:
+                import shutil
+                total, used, _ = shutil.disk_usage("/")
+                stats["disk_used_gb"]  = round(used  / 1024**3, 1)
+                stats["disk_total_gb"] = round(total / 1024**3, 1)
+                stats["disk_percent"]  = round(used / total * 100, 1)
+            except Exception:
+                pass
+            try:
+                with open("/proc/meminfo") as f:
+                    m = {p[0].rstrip(":"): int(p[1])
+                         for line in f for p in [line.split()] if len(p) >= 2}
+                total_kb = m.get("MemTotal", 0)
+                used_kb  = total_kb - m.get("MemAvailable", 0)
+                stats["ram_total_mb"] = total_kb // 1024
+                stats["ram_used_mb"]  = used_kb  // 1024
+                stats["ram_percent"]  = round(used_kb / total_kb * 100, 1) if total_kb else 0
+            except Exception:
+                pass
+            try:
+                with open("/proc/uptime") as f:
+                    stats["uptime_seconds"] = int(float(f.read().split()[0]))
+            except Exception:
+                pass
+
+        # CPU temperature (Raspberry Pi thermal sensor)
+        for tp in ["/sys/class/thermal/thermal_zone0/temp",
+                   "/sys/devices/virtual/thermal/thermal_zone0/temp"]:
+            try:
+                with open(tp) as f:
+                    stats["cpu_temp_c"] = round(int(f.read().strip()) / 1000, 1)
+                break
+            except Exception:
+                pass
+
+        return jsonify(stats)
+
+    @app.route("/api/system/restart", methods=["POST"])
+    def api_system_restart():
+        """Restart the MIDI Box service via SIGTERM — systemd will bring it back up."""
+        import os
+        import signal as _signal
+        import threading
+
+        def _kill():
+            time.sleep(0.4)   # let Flask finish sending the response
+            os.kill(os.getpid(), _signal.SIGTERM)
+
+        threading.Thread(target=_kill, daemon=True).start()
+        return jsonify({"ok": True, "message": "Restarting service..."})
+
     def _make_qr_svg(data: str) -> Response:
         try:
             import qrcode

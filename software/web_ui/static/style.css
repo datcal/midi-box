@@ -116,6 +116,103 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Panic / restart button (always visible in sidebar footer) --- */
+
+.panic-btn {
+  width: 100%;
+  padding: 9px 0;
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.panic-btn:hover  { background: #c0392b; }
+.panic-btn:active { transform: scale(0.97); }
+.panic-btn:disabled { opacity: 0.6; cursor: default; }
+
+.panic-status {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  min-height: 14px;
+}
+
+/* --- System page --- */
+
+.sys-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.sys-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.sys-bar-wrap {
+  background: var(--bg-primary);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.sys-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.sys-stat-value {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.sys-info-card {
+  padding: 16px;
+  text-align: center;
+}
+
+.sys-info-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.sys-info-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sys-service-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(46, 204, 113, 0.15);
+  color: var(--success);
+}
+
 .main {
   flex: 1;
   overflow-y: auto;

@@ -4,6 +4,7 @@ python-rtmidi>=1.5.0
 flask>=3.0
 pyyaml>=6.0
 qrcode>=7.4          # QR code generation for WiFi connect display
+psutil>=5.9          # CPU / RAM / disk stats for the system page
 
 # Hardware MIDI serial (used on Pi for SC16IS752, optional on Mac)
 pyserial>=3.5

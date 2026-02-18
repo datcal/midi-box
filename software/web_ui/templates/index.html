@@ -40,9 +40,14 @@
       <li><a href="#logs" data-page="logs">
         <span class="nav-icon">&#9993;</span><span>Logs</span>
       </a></li>
+      <li><a href="#system" data-page="system">
+        <span class="nav-icon">&#11041;</span><span>System</span>
+      </a></li>
     </ul>
     <div class="sidebar-footer">
-      <span id="device-count">0</span> devices connected
+      <button class="panic-btn" id="panic-btn" onclick="panicRestart()">&#9724; PANIC</button>
+      <div class="panic-status" id="panic-status"></div>
+      <div style="margin-top:8px;"><span id="device-count">0</span> devices connected</div>
     </div>
   </aside>
 
@@ -398,6 +403,66 @@
           <button class="btn btn-sm" onclick="clearLogs()">Clear</button>
         </div>
         <div class="log-viewer" id="log-viewer"></div>
+      </div>
+    </div>
+
+    <!-- ============== SYSTEM ============== -->
+    <div class="page" id="page-system">
+      <div class="page-header">
+        <h2>System</h2>
+        <p>Raspberry Pi performance and service control</p>
+      </div>
+
+      <!-- Stat bars -->
+      <div class="grid-3" id="sys-stat-row">
+        <div class="card sys-stat-card">
+          <div class="sys-stat-label">CPU</div>
+          <div class="sys-bar-wrap"><div class="sys-bar" id="sys-cpu-bar"></div></div>
+          <div class="sys-stat-value" id="sys-cpu-val">—</div>
+        </div>
+        <div class="card sys-stat-card">
+          <div class="sys-stat-label">RAM</div>
+          <div class="sys-bar-wrap"><div class="sys-bar sys-bar-ram" id="sys-ram-bar"></div></div>
+          <div class="sys-stat-value" id="sys-ram-val">—</div>
+        </div>
+        <div class="card sys-stat-card">
+          <div class="sys-stat-label">Disk</div>
+          <div class="sys-bar-wrap"><div class="sys-bar sys-bar-disk" id="sys-disk-bar"></div></div>
+          <div class="sys-stat-value" id="sys-disk-val">—</div>
+        </div>
+      </div>
+
+      <!-- Info row -->
+      <div class="grid-3" style="margin-top:8px;">
+        <div class="card sys-info-card">
+          <div class="sys-info-label">Temperature</div>
+          <div class="sys-info-value" id="sys-temp">— °C</div>
+        </div>
+        <div class="card sys-info-card">
+          <div class="sys-info-label">Uptime</div>
+          <div class="sys-info-value" id="sys-uptime">—</div>
+        </div>
+        <div class="card sys-info-card">
+          <div class="sys-info-label">Platform</div>
+          <div class="sys-info-value" id="sys-platform">—</div>
+        </div>
+      </div>
+
+      <!-- Service control -->
+      <div class="card" style="margin-top:8px;">
+        <div class="card-header">
+          <h3>Service Control</h3>
+          <span class="sys-service-badge" id="sys-service-badge">RUNNING</span>
+        </div>
+        <p style="font-size:12px; color:var(--text-secondary); margin-bottom:16px;">
+          Restart sends SIGTERM to the process. systemd will restart it automatically
+          (<code>Restart=always</code>). Takes ~5 seconds.
+        </p>
+        <div class="btn-group">
+          <button class="btn btn-danger" style="font-size:16px; padding:10px 28px;"
+                  onclick="panicRestart()">&#9724; Restart Service</button>
+        </div>
+        <div class="panic-status" id="sys-restart-status" style="margin-top:12px; font-size:13px;"></div>
       </div>
     </div>
 
