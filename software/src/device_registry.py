@@ -108,6 +108,18 @@ class DeviceRegistry:
         if not friendly_name:
             friendly_name, device_info = self.match_config_by_port_name(name)
 
+        # If this friendly name is already registered, keep the first port found.
+        # Some devices (e.g. MicroBrute) expose multiple USB MIDI ports; the
+        # first port is the main MIDI port; later ports (MIDI Interface, SysEx)
+        # would overwrite and break routing if allowed through.
+        existing = self.active_devices.get(friendly_name)
+        if existing and existing.connected:
+            logger.debug(
+                f"Device '{friendly_name}' already registered via {existing.port_id}, "
+                f"skipping secondary port {port_id}"
+            )
+            return existing
+
         # Apply user overrides if any
         overrides = self._device_overrides.get(friendly_name, {})
 

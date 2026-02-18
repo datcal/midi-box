@@ -263,7 +263,18 @@ class MidiBox:
         saved_routes = self.state.get_routes()
 
         if saved_routes:
-            # Restore from saved state
+            # Drop any saved routes whose endpoints don't match real devices.
+            # This purges stale routes (e.g. "RtMidiOut Client") that were
+            # accidentally saved during a hotplug explosion before the rtmidi
+            # filter was added.
+            known = set(self.registry.get_all_devices().keys())
+            valid = [r for r in saved_routes if r["from"] in known and r["to"] in known]
+            if len(valid) < len(saved_routes):
+                dropped = [r["name"] for r in saved_routes if r not in valid]
+                logger.warning(f"Dropped {len(dropped)} stale route(s) from state: {dropped}")
+                self.state.set_routes(valid)
+                saved_routes = valid
+
             logger.info(f"Restoring {len(saved_routes)} routes from saved state")
             self.router.load_routes(saved_routes)
             clock = self.state.get_clock_source()

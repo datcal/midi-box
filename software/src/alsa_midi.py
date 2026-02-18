@@ -48,10 +48,15 @@ class AlsaMidi:
             return []
         all_ports = inputs | outputs
 
-        # Filter out system ports (like "Midi Through")
+        # Filter out system ports and our own rtmidi loopback clients.
+        # RtMidiIn/RtMidiOut clients are created by python-rtmidi itself each
+        # time we open a port; they appear in ALSA and trigger the hotplug
+        # monitor, causing an exponential port-creation loop if not excluded.
         devices = [
             p for p in all_ports
-            if "through" not in p.lower() and "midi box" not in p.lower()
+            if "through" not in p.lower()
+            and "midi box" not in p.lower()
+            and "rtmidi" not in p.lower()
         ]
 
         logger.debug(f"Scan found {len(devices)} MIDI devices")
