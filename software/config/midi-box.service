@@ -1,0 +1,31 @@
+# =============================================================================
+# MIDI Box — systemd service
+# =============================================================================
+# Install:
+#   sudo cp software/config/midi-box.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now midi-box
+#
+# (pi_setup.sh handles this automatically)
+# =============================================================================
+
+[Unit]
+Description=MIDI Box Router
+Documentation=https://github.com/your-org/midi-box
+After=network.target sound.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/midi-box/software
+ExecStart=/home/pi/midi-box/software/.venv/bin/python src/main.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=midi-box
+
+[Install]
+WantedBy=multi-user.target

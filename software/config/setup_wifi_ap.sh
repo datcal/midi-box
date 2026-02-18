@@ -33,6 +33,11 @@ echo "  Pass   : $AP_PASS"
 echo "  Pi IP  : $AP_IP"
 echo "======================================================"
 
+# --- Fix rfkill before touching WiFi ---
+# This resolves "WiFi is currently blocked by rfkill" on fresh Pi OS installs.
+echo "[0/5] Unblocking WiFi (rfkill)..."
+rfkill unblock all 2>/dev/null || true
+
 # --- Install packages ---
 echo "[1/5] Installing hostapd and dnsmasq..."
 apt-get update -qq
@@ -40,15 +45,19 @@ apt-get install -y hostapd dnsmasq
 
 systemctl stop hostapd dnsmasq 2>/dev/null || true
 
-# --- Static IP for wlan0 ---
+# --- Static IP for wlan0 (idempotent: skip if already configured) ---
 echo "[2/5] Configuring static IP on wlan0..."
-cat >> /etc/dhcpcd.conf << EOF
+if ! grep -q "# MIDI Box WiFi AP" /etc/dhcpcd.conf 2>/dev/null; then
+  cat >> /etc/dhcpcd.conf << EOF
 
 # MIDI Box WiFi AP
 interface wlan0
   static ip_address=${AP_IP}/24
   nohook wpa_supplicant
 EOF
+else
+  echo "  (dhcpcd.conf already configured — skipping)"
+fi
 
 # --- dnsmasq: DHCP for connected clients ---
 echo "[3/5] Configuring dnsmasq..."
