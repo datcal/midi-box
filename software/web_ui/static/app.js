@@ -41,6 +41,7 @@ function loadPageData(page) {
     case 'routing': loadRouting(); break;
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
+    case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
   }
@@ -96,6 +97,7 @@ async function loadDashboard() {
         <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">
           IN:${d.msg_count_in} OUT:${d.msg_count_out}
         </span>
+        <button class="btn btn-sm" style="margin-left:auto;" onclick="openDeviceModal('${esc(d.name)}')">Configure</button>
       </div>
     </div>
   `).join('');
@@ -649,6 +651,192 @@ async function refreshLogs() {
 async function clearLogs() {
   await api('/logs/clear', { method: 'POST' });
   document.getElementById('log-viewer').innerHTML = '';
+}
+
+// --- MIDI Player ---
+
+let playerInterval = null;
+
+async function loadPlayer() {
+  const [playerData, devData] = await Promise.all([
+    api('/player'),
+    api('/devices'),
+  ]);
+
+  // Populate file select
+  const fileSelect = document.getElementById('player-file');
+  fileSelect.innerHTML = playerData.files.length === 0
+    ? '<option value="">No MIDI files — upload one</option>'
+    : playerData.files.map(f =>
+        `<option value="${esc(f.name)}">${esc(f.name)} (${f.duration}s, ${f.tracks} tracks)</option>`
+      ).join('');
+
+  // Populate destination select (output devices)
+  const destSelect = document.getElementById('player-dest');
+  const outputDevices = devData.devices.filter(d => d.direction === 'both' || d.direction === 'out');
+  destSelect.innerHTML = outputDevices.map(d =>
+    `<option value="${esc(d.name)}">${esc(d.name)}</option>`
+  ).join('');
+
+  // Restore current status
+  updatePlayerUI(playerData.status);
+
+  // Render file list
+  renderMidiFileList(playerData.files);
+
+  // Start polling player status
+  if (playerInterval) clearInterval(playerInterval);
+  playerInterval = setInterval(pollPlayerStatus, 500);
+}
+
+async function pollPlayerStatus() {
+  if (currentPage !== 'player') {
+    clearInterval(playerInterval);
+    playerInterval = null;
+    return;
+  }
+  const data = await api('/player');
+  updatePlayerUI(data.status);
+}
+
+function updatePlayerUI(status) {
+  const playBtn = document.getElementById('player-play-btn');
+  const pauseBtn = document.getElementById('player-pause-btn');
+  const stopBtn = document.getElementById('player-stop-btn');
+  const statusEl = document.getElementById('player-status');
+
+  if (status.playing) {
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    pauseBtn.textContent = 'Pause';
+    stopBtn.disabled = false;
+    const pos = status.position || 0;
+    const dur = status.duration || 0;
+    statusEl.textContent = `Playing: ${status.file} → ${status.destination} (${pos.toFixed(1)}s / ${dur.toFixed(1)}s)${status.loop ? ' [LOOP]' : ''}`;
+    statusEl.style.color = 'var(--accent)';
+  } else if (status.paused) {
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    pauseBtn.textContent = 'Resume';
+    stopBtn.disabled = false;
+    statusEl.textContent = `Paused: ${status.file}`;
+    statusEl.style.color = 'var(--warning, #f0a030)';
+  } else {
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+    pauseBtn.textContent = 'Pause';
+    stopBtn.disabled = true;
+    statusEl.textContent = 'Stopped';
+    statusEl.style.color = 'var(--text-muted)';
+  }
+}
+
+async function playerPlay() {
+  const file = document.getElementById('player-file').value;
+  const dest = document.getElementById('player-dest').value;
+  const loop = document.getElementById('player-loop').checked;
+  const tempo = parseInt(document.getElementById('player-tempo').value) / 100;
+
+  if (!file || !dest) return;
+
+  await api('/player/play', {
+    method: 'POST',
+    body: { file, destination: dest, loop, tempo },
+  });
+}
+
+async function playerPause() {
+  const data = await api('/player');
+  if (data.status.paused) {
+    await api('/player/resume', { method: 'POST' });
+  } else {
+    await api('/player/pause', { method: 'POST' });
+  }
+}
+
+async function playerStop() {
+  await api('/player/stop', { method: 'POST' });
+}
+
+async function uploadMidiFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const resp = await fetch('/api/player/upload', { method: 'POST', body: formData });
+  const data = await resp.json();
+
+  if (data.ok) {
+    loadPlayer();
+  } else {
+    alert('Upload failed: ' + (data.error || 'unknown error'));
+  }
+  input.value = '';
+}
+
+async function deleteMidiFile(name) {
+  if (!confirm(`Delete "${name}"?`)) return;
+  await api('/player/delete', { method: 'POST', body: { file: name } });
+  loadPlayer();
+}
+
+function renderMidiFileList(files) {
+  const list = document.getElementById('midi-file-list');
+  if (files.length === 0) {
+    list.innerHTML = '<li class="preset-item" style="color:var(--text-muted);">No MIDI files uploaded. Click "Upload .mid" to add one.</li>';
+    return;
+  }
+
+  list.innerHTML = files.map(f => `
+    <li class="preset-item">
+      <div>
+        <div class="preset-name">${esc(f.name)}</div>
+        <div class="preset-desc">${f.duration}s &middot; ${f.tracks} track${f.tracks !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-sm btn-danger" onclick="deleteMidiFile('${esc(f.name)}')">Delete</button>
+      </div>
+    </li>
+  `).join('');
+}
+
+// --- Device Config Modal ---
+
+let pendingDeviceName = null;
+
+function openDeviceModal(name) {
+  pendingDeviceName = name;
+  const dev = devices.find(d => d.name === name);
+  if (!dev) return;
+
+  document.getElementById('device-modal-name').textContent = name;
+  document.getElementById('device-direction').value = dev.direction || 'both';
+  document.getElementById('device-type').value = dev.device_type || 'unknown';
+  document.getElementById('device-channel').value = dev.midi_channel || 0;
+  document.getElementById('device-modal').classList.add('active');
+}
+
+function closeDeviceModal() {
+  document.getElementById('device-modal').classList.remove('active');
+  pendingDeviceName = null;
+}
+
+async function applyDeviceConfig() {
+  if (!pendingDeviceName) return;
+
+  const direction = document.getElementById('device-direction').value;
+  const device_type = document.getElementById('device-type').value;
+  const midi_channel = parseInt(document.getElementById('device-channel').value) || 0;
+
+  await api(`/devices/${encodeURIComponent(pendingDeviceName)}/config`, {
+    method: 'POST',
+    body: { direction, device_type, midi_channel },
+  });
+
+  closeDeviceModal();
+  loadDashboard();
 }
 
 // --- Utilities ---

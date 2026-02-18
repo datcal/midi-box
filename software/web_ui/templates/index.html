@@ -26,10 +26,13 @@
         <span class="nav-icon">&#9776;</span><span>Presets</span>
       </a></li>
       <li><a href="#monitor" data-page="monitor">
-        <span class="nav-icon">&#9654;</span><span>MIDI Monitor</span>
+        <span class="nav-icon">&#9783;</span><span>MIDI Monitor</span>
       </a></li>
       <li><a href="#settings" data-page="settings">
         <span class="nav-icon">&#9881;</span><span>Settings</span>
+      </a></li>
+      <li><a href="#player" data-page="player">
+        <span class="nav-icon">&#9654;</span><span>Player</span>
       </a></li>
       <li><a href="#logs" data-page="logs">
         <span class="nav-icon">&#9993;</span><span>Logs</span>
@@ -265,6 +268,57 @@
       </div>
     </div>
 
+    <!-- ============== PLAYER ============== -->
+    <div class="page" id="page-player">
+      <div class="page-header">
+        <h2>MIDI Player</h2>
+        <p>Play MIDI files to any destination</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Transport</h3>
+          <div class="btn-group">
+            <button class="btn btn-sm" onclick="document.getElementById('midi-upload').click()">Upload .mid</button>
+            <input type="file" id="midi-upload" accept=".mid,.midi" style="display:none" onchange="uploadMidiFile(this)">
+          </div>
+        </div>
+
+        <div class="player-transport" id="player-transport">
+          <div class="player-file-row">
+            <label>File</label>
+            <select id="player-file" style="flex:1;"></select>
+            <label style="margin-left:12px;">Destination</label>
+            <select id="player-dest" style="flex:1;"></select>
+          </div>
+          <div class="player-controls">
+            <button class="btn btn-accent" id="player-play-btn" onclick="playerPlay()">Play</button>
+            <button class="btn" id="player-pause-btn" onclick="playerPause()" disabled>Pause</button>
+            <button class="btn btn-danger" id="player-stop-btn" onclick="playerStop()" disabled>Stop</button>
+            <label style="font-size:12px; display:flex; align-items:center; gap:4px; margin-left:12px;">
+              <input type="checkbox" id="player-loop"> Loop
+            </label>
+            <label style="font-size:12px; display:flex; align-items:center; gap:6px; margin-left:12px;">
+              Tempo
+              <input type="range" id="player-tempo" min="25" max="200" value="100" style="width:80px;"
+                     oninput="document.getElementById('player-tempo-val').textContent = this.value + '%'">
+              <span id="player-tempo-val">100%</span>
+            </label>
+          </div>
+          <div class="player-status" id="player-status" style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+            Stopped
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:12px;">
+        <div class="card-header">
+          <h3>MIDI Files</h3>
+        </div>
+        <ul class="preset-list" id="midi-file-list"></ul>
+      </div>
+    </div>
+
     <!-- ============== LOGS ============== -->
     <div class="page" id="page-logs">
       <div class="page-header">
@@ -282,6 +336,42 @@
     </div>
 
   </main>
+</div>
+
+<!-- Device Config Modal -->
+<div class="modal-overlay" id="device-modal">
+  <div class="modal">
+    <h3>Device Settings</h3>
+    <div id="device-modal-name" style="font-size:14px; font-weight:600; color:var(--accent); margin-bottom:12px;"></div>
+    <div class="form-row">
+      <label>Direction</label>
+      <select id="device-direction">
+        <option value="both">Both (Source + Destination)</option>
+        <option value="in">Source Only (IN)</option>
+        <option value="out">Destination Only (OUT)</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Device Type</label>
+      <select id="device-type">
+        <option value="controller">Controller / Keyboard</option>
+        <option value="controller_sequencer">Controller + Sequencer</option>
+        <option value="synth">Synthesizer</option>
+        <option value="sampler">Sampler</option>
+        <option value="drum_machine">Drum Machine</option>
+        <option value="effect">Effect Processor</option>
+        <option value="unknown">Unknown</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Default MIDI Channel (0 = all)</label>
+      <input type="number" id="device-channel" min="0" max="16" value="0">
+    </div>
+    <div class="form-actions">
+      <button class="btn" onclick="closeDeviceModal()">Cancel</button>
+      <button class="btn btn-accent" onclick="applyDeviceConfig()">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- Filter Edit Modal -->

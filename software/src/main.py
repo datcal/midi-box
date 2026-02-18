@@ -19,6 +19,7 @@ from alsa_midi import AlsaMidi
 from router import MidiRouter
 from preset_manager import PresetManager
 from midi_logger import MidiLogger
+from midi_player import MidiPlayer
 from state import StateManager
 from ui_web import create_app, LogBuffer
 
@@ -68,6 +69,7 @@ class MidiBox:
         self.presets = PresetManager()
         self.state = StateManager()
         self.midi_logger = MidiLogger(max_entries=500)
+        self.player = MidiPlayer()
         self.log_buffer = LogBuffer()
         self.mode = "standalone"
         self.wifi_config = self._load_wifi_config()
@@ -85,12 +87,18 @@ class MidiBox:
         # Restore saved state
         self.state.load()
 
+        # Apply device overrides from saved state
+        self.registry.set_device_overrides(
+            self.state.state.get("device_overrides", {})
+        )
+
         # Detect mode
         self.mode = self._detect_mode()
         logger.info(f"Mode: {self.mode.upper()}")
 
         # Register the send callback
         self.router.set_send_callback(self._send_midi)
+        self.player._send_callback = self._send_midi
 
         # Open MIDI devices (real or mock)
         if self.args.mock:
@@ -133,6 +141,7 @@ class MidiBox:
 
     def stop(self):
         logger.info("Shutting down...")
+        self.player.stop()
         self._save_state()
         self._running = False
         self.alsa.close_all()
@@ -164,9 +173,9 @@ class MidiBox:
         """Open all USB MIDI devices and register them."""
         ports = self.alsa.open_all()
         for port in ports:
-            device = self.registry.register_usb_device(port.port_name, port.name)
+            device = self.registry.register_usb_device(port.port_name, port.port_name)
             if device:
-                logger.info(f"  USB: {device.name}")
+                logger.info(f"  USB: {device.name} (port: {port.port_name})")
         if not ports:
             logger.info("  No USB MIDI devices found")
 
@@ -344,13 +353,21 @@ class MidiBox:
         self.midi_logger.log_input(port_name, message)
         self.router.process_message(port_name, message)
 
-    def _on_usb_device_connected(self, name: str, port):
-        self.registry.register_usb_device(port.port_name, name)
-        logger.info(f"Hotplug: {name} connected")
+    def _on_usb_device_connected(self, port_name: str, port):
+        device = self.registry.register_usb_device(port.port_name, port_name)
+        if device:
+            logger.info(f"Hotplug: {device.name} connected (port: {port_name})")
 
-    def _on_usb_device_disconnected(self, name: str):
-        self.registry.unregister_device(name)
-        logger.info(f"Hotplug: {name} disconnected")
+    def _on_usb_device_disconnected(self, port_name: str):
+        # Find the device by port_id since port_name is the raw ALSA name
+        device = self.registry.find_by_port_id(port_name)
+        if device:
+            self.registry.unregister_device(device.name)
+            logger.info(f"Hotplug: {device.name} disconnected")
+        else:
+            # Try direct name match as fallback
+            self.registry.unregister_device(port_name)
+            logger.info(f"Hotplug: {port_name} disconnected")
 
 
 # ---------------------------------------------------------------------------

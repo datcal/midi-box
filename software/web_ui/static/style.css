@@ -510,6 +510,38 @@ body {
 
 /* --- MIDI Monitor --- */
 
+/* --- Player --- */
+
+.player-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.player-file-row select {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.player-controls input[type="range"] {
+  accent-color: var(--accent);
+}
+
+/* --- Monitor --- */
+
 .monitor-controls {
   display: flex;
   align-items: center;

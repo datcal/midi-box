@@ -30,6 +30,7 @@ class DeviceRegistry:
         self.usb_devices: dict[str, dict] = {}
         self.hardware_ports: dict[str, dict] = {}
         self.active_devices: dict[str, MidiDevice] = {}
+        self._device_overrides: dict[str, dict] = {}  # user overrides from state
         self._load_config()
 
     def _load_config(self):
@@ -47,6 +48,45 @@ class DeviceRegistry:
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
 
+    def set_device_overrides(self, overrides: dict):
+        """Load user-configured device overrides from state."""
+        self._device_overrides = overrides or {}
+
+    def match_config_by_port_name(self, port_name: str) -> tuple[str, dict]:
+        """Match an ALSA/CoreMIDI port name against known devices from config.
+
+        Returns (friendly_name, config_dict) or (port_name, {}) if not found.
+        Port names look like:
+          macOS:  "KeyLab 88 MK2" or "KeyLab 88 MK2 Port 1"
+          Linux:  "KeyLab 88 MK2:KeyLab 88 MK2 MIDI 1 28:0"
+        """
+        port_lower = port_name.lower()
+
+        # Try matching against known device names from config
+        for vendor_product, info in self.usb_devices.items():
+            known_name = info.get("name", "")
+            if known_name and known_name.lower() in port_lower:
+                return known_name, info
+
+        # No match — use the raw port name, cleaned up
+        friendly = self._clean_port_name(port_name)
+        return friendly, {}
+
+    def _clean_port_name(self, port_name: str) -> str:
+        """Extract a human-friendly name from a raw MIDI port name."""
+        # Remove ALSA-style suffix like ":KeyLab 88 MK2 MIDI 1 28:0"
+        if ":" in port_name:
+            parts = port_name.split(":")
+            # Use the first part (usually the device name)
+            name = parts[0].strip()
+        else:
+            name = port_name
+
+        # Remove trailing port numbers like "Port 1", "MIDI 1"
+        import re
+        name = re.sub(r'\s+(Port|MIDI)\s+\d+$', '', name, flags=re.IGNORECASE)
+        return name.strip() or port_name
+
     def identify_usb_device(self, vendor_id: int, product_id: int) -> str | None:
         """Look up a friendly name for a USB MIDI device by vendor:product ID."""
         key = f"{vendor_id:04x}:{product_id:04x}"
@@ -55,19 +95,33 @@ class DeviceRegistry:
         return None
 
     def register_usb_device(self, port_id: str, name: str, vendor_product: str = ""):
-        """Register a connected USB MIDI device."""
+        """Register a connected USB MIDI device.
+
+        If vendor_product is given, use config lookup.
+        Otherwise, try to match by port name.
+        """
+        # Try config lookup by vendor:product first
         device_info = self.usb_devices.get(vendor_product, {})
+        friendly_name = device_info.get("name", "") if device_info else ""
+
+        # If no vendor_product match, try name matching
+        if not friendly_name:
+            friendly_name, device_info = self.match_config_by_port_name(name)
+
+        # Apply user overrides if any
+        overrides = self._device_overrides.get(friendly_name, {})
+
         device = MidiDevice(
-            name=name,
+            name=friendly_name,
             port_type="usb",
-            direction="both",
-            device_type=device_info.get("type", "unknown"),
+            direction=overrides.get("direction", device_info.get("direction", "both")),
+            device_type=overrides.get("device_type", device_info.get("type", "unknown")),
             port_id=port_id,
-            midi_channel=device_info.get("default_channel", 0),
+            midi_channel=overrides.get("midi_channel", device_info.get("default_channel", 0)),
             connected=True,
         )
-        self.active_devices[name] = device
-        logger.info(f"Registered USB device: {name} on {port_id}")
+        self.active_devices[friendly_name] = device
+        logger.info(f"Registered USB device: {friendly_name} (port: {port_id})")
         return device
 
     def register_hardware_device(self, serial_port: str):
@@ -75,21 +129,38 @@ class DeviceRegistry:
         port_key = Path(serial_port).name  # e.g., "ttySC0"
         if port_key in self.hardware_ports:
             info = self.hardware_ports[port_key]
+            name = info["name"]
+            overrides = self._device_overrides.get(name, {})
             device = MidiDevice(
-                name=info["name"],
+                name=name,
                 port_type="hardware",
-                direction=info.get("direction", "out"),
-                device_type=info.get("type", "synth"),
+                direction=overrides.get("direction", info.get("direction", "out")),
+                device_type=overrides.get("device_type", info.get("type", "synth")),
                 port_id=serial_port,
-                midi_channel=info.get("default_channel", 0),
+                midi_channel=overrides.get("midi_channel", info.get("default_channel", 0)),
                 connected=True,
             )
-            self.active_devices[info["name"]] = device
-            logger.info(f"Registered hardware device: {info['name']} on {serial_port}")
+            self.active_devices[name] = device
+            logger.info(f"Registered hardware device: {name} on {serial_port}")
             return device
         else:
             logger.warning(f"Unknown hardware port: {port_key}")
             return None
+
+    def update_device_config(self, name: str, direction: str = None,
+                              device_type: str = None, midi_channel: int = None) -> bool:
+        """Update device configuration (called from UI)."""
+        dev = self.active_devices.get(name)
+        if not dev:
+            return False
+        if direction is not None:
+            dev.direction = direction
+        if device_type is not None:
+            dev.device_type = device_type
+        if midi_channel is not None:
+            dev.midi_channel = midi_channel
+        logger.info(f"Updated device config: {name} -> dir={dev.direction}, type={dev.device_type}")
+        return True
 
     def get_device(self, name: str) -> MidiDevice | None:
         return self.active_devices.get(name)
@@ -114,6 +185,13 @@ class DeviceRegistry:
             self.active_devices[name].connected = False
             del self.active_devices[name]
             logger.info(f"Unregistered device: {name}")
+
+    def find_by_port_id(self, port_id: str) -> MidiDevice | None:
+        """Find a device by its port_id (ALSA port name)."""
+        for dev in self.active_devices.values():
+            if dev.port_id == port_id:
+                return dev
+        return None
 
     def list_devices(self) -> str:
         lines = ["Connected MIDI Devices:", ""]

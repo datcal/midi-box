@@ -141,6 +141,34 @@ def create_app(midi_box_instance):
             })
         return jsonify({"devices": devices, "mode": _midi_box.mode})
 
+    @app.route("/api/devices/<name>/config", methods=["POST"])
+    def api_device_config(name):
+        """Update device direction, type, or channel from the UI."""
+        data = request.json
+        direction = data.get("direction")
+        device_type = data.get("device_type")
+        midi_channel = data.get("midi_channel")
+
+        ok = _midi_box.registry.update_device_config(
+            name, direction=direction, device_type=device_type,
+            midi_channel=midi_channel,
+        )
+        if not ok:
+            return jsonify({"ok": False, "error": "Device not found"}), 404
+
+        # Persist override to state
+        dev = _midi_box.registry.get_device(name)
+        _midi_box.state.set_device_override(name, {
+            "direction": dev.direction,
+            "device_type": dev.device_type,
+            "midi_channel": dev.midi_channel,
+        })
+        # Update registry overrides cache
+        _midi_box.registry.set_device_overrides(
+            _midi_box.state.get_device_overrides()
+        )
+        return jsonify({"ok": True})
+
     # ---------------------------------------------------------------
     # API: Routes
     # ---------------------------------------------------------------
@@ -292,10 +320,90 @@ def create_app(midi_box_instance):
 
     @app.route("/api/settings/rescan", methods=["POST"])
     def api_settings_rescan():
-        """Force rescan of MIDI devices."""
-        _midi_box._init_usb_midi()
+        """Force rescan of MIDI devices — close all and reopen."""
+        # Clear USB devices from registry (keep hardware)
+        usb_names = [
+            name for name, d in _midi_box.registry.get_all_devices().items()
+            if d.port_type == "usb"
+        ]
+        for name in usb_names:
+            _midi_box.registry.unregister_device(name)
+
+        # Full rescan
+        ports = _midi_box.alsa.rescan()
+        for port in ports:
+            _midi_box.registry.register_usb_device(port.port_name, port.port_name)
+
         devices = list(_midi_box.registry.get_all_devices().keys())
+        logger.info(f"Rescan complete: {len(devices)} devices")
         return jsonify({"ok": True, "devices": devices})
+
+    # ---------------------------------------------------------------
+    # API: MIDI Player
+    # ---------------------------------------------------------------
+
+    @app.route("/api/player")
+    def api_player_status():
+        return jsonify({
+            "status": _midi_box.player.status,
+            "files": _midi_box.player.list_files(),
+        })
+
+    @app.route("/api/player/upload", methods=["POST"])
+    def api_player_upload():
+        file = request.files.get("file")
+        if not file or not file.filename:
+            return jsonify({"ok": False, "error": "No file"}), 400
+        data = file.read()
+        ok = _midi_box.player.upload(file.filename, data)
+        return jsonify({"ok": ok})
+
+    @app.route("/api/player/play", methods=["POST"])
+    def api_player_play():
+        data = request.json
+        filename = data.get("file")
+        destination = data.get("destination")
+        if not filename or not destination:
+            return jsonify({"ok": False, "error": "file and destination required"}), 400
+        ok = _midi_box.player.play(
+            filename, destination,
+            loop=data.get("loop", False),
+            tempo_factor=data.get("tempo", 1.0),
+        )
+        return jsonify({"ok": ok})
+
+    @app.route("/api/player/stop", methods=["POST"])
+    def api_player_stop():
+        _midi_box.player.stop()
+        return jsonify({"ok": True})
+
+    @app.route("/api/player/pause", methods=["POST"])
+    def api_player_pause():
+        _midi_box.player.pause()
+        return jsonify({"ok": True})
+
+    @app.route("/api/player/resume", methods=["POST"])
+    def api_player_resume():
+        _midi_box.player.resume()
+        return jsonify({"ok": True})
+
+    @app.route("/api/player/loop", methods=["POST"])
+    def api_player_loop():
+        data = request.json
+        _midi_box.player.set_loop(data.get("loop", False))
+        return jsonify({"ok": True})
+
+    @app.route("/api/player/tempo", methods=["POST"])
+    def api_player_tempo():
+        data = request.json
+        _midi_box.player.set_tempo(data.get("tempo", 1.0))
+        return jsonify({"ok": True})
+
+    @app.route("/api/player/delete", methods=["POST"])
+    def api_player_delete():
+        data = request.json
+        ok = _midi_box.player.delete(data.get("file", ""))
+        return jsonify({"ok": ok})
 
     # ---------------------------------------------------------------
     # API: Application Logs

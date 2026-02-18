@@ -21,6 +21,7 @@ DEFAULT_STATE = {
     "current_preset": "default",
     "clock_source": None,
     "routes": [],
+    "device_overrides": {},  # {device_name: {direction, device_type, midi_channel}}
     "settings": {
         "mode": "standalone",
         "log_level": "INFO",
@@ -106,6 +107,15 @@ class StateManager:
 
     def get_clock_source(self) -> str | None:
         return self.state.get("clock_source")
+
+    def get_device_overrides(self) -> dict:
+        return self.state.get("device_overrides", {})
+
+    def set_device_override(self, name: str, config: dict):
+        if "device_overrides" not in self.state:
+            self.state["device_overrides"] = {}
+        self.state["device_overrides"][name] = config
+        self.save()
 
     def get_settings(self) -> dict:
         return self.state.get("settings", {})

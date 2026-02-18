@@ -36,6 +36,7 @@ class AlsaMidi:
         self.on_device_disconnected = on_device_disconnected
         self._poll_thread: threading.Thread | None = None
         self._running = False
+        self._lock = threading.Lock()
 
     def scan_devices(self) -> list[str]:
         """Scan for available MIDI input and output ports."""
@@ -53,7 +54,7 @@ class AlsaMidi:
             if "through" not in p.lower() and "midi box" not in p.lower()
         ]
 
-        logger.info(f"Found {len(devices)} MIDI devices")
+        logger.debug(f"Scan found {len(devices)} MIDI devices")
         for d in sorted(devices):
             directions = []
             if d in inputs:
@@ -66,8 +67,9 @@ class AlsaMidi:
 
     def open_port(self, port_name: str) -> AlsaPort | None:
         """Open input and/or output for a named MIDI port."""
-        if port_name in self.ports:
-            return self.ports[port_name]
+        with self._lock:
+            if port_name in self.ports:
+                return self.ports[port_name]
 
         inputs = mido.get_input_names()
         outputs = mido.get_output_names()
@@ -89,7 +91,8 @@ class AlsaMidi:
             logger.error(f"Failed to open output {port_name}: {e}")
 
         if port.input_port or port.output_port:
-            self.ports[port_name] = port
+            with self._lock:
+                self.ports[port_name] = port
             return port
 
         logger.warning(f"Could not open any ports for: {port_name}")
@@ -106,7 +109,8 @@ class AlsaMidi:
 
     def send(self, port_name: str, message: mido.Message) -> bool:
         """Send a MIDI message to a named port."""
-        port = self.ports.get(port_name)
+        with self._lock:
+            port = self.ports.get(port_name)
         if port and port.output_port:
             try:
                 port.output_port.send(message)
@@ -117,20 +121,25 @@ class AlsaMidi:
 
     def receive(self, port_name: str, timeout: float = 0) -> mido.Message | None:
         """Receive a MIDI message from a named port (non-blocking by default)."""
-        port = self.ports.get(port_name)
+        with self._lock:
+            port = self.ports.get(port_name)
         if port and port.input_port:
-            if timeout > 0:
-                return port.input_port.poll()  # Non-blocking
-            # Check for pending messages
-            for msg in port.input_port.iter_pending():
-                return msg
+            try:
+                if timeout > 0:
+                    return port.input_port.poll()
+                for msg in port.input_port.iter_pending():
+                    return msg
+            except Exception as e:
+                logger.debug(f"Receive error on {port_name}: {e}")
         return None
 
     def get_input_ports(self) -> list[str]:
-        return [name for name, p in self.ports.items() if p.input_port]
+        with self._lock:
+            return [name for name, p in self.ports.items() if p.input_port]
 
     def get_output_ports(self) -> list[str]:
-        return [name for name, p in self.ports.items() if p.output_port]
+        with self._lock:
+            return [name for name, p in self.ports.items() if p.output_port]
 
     def start_hotplug_monitor(self, interval: float = 2.0):
         """Start a background thread that polls for device changes."""
@@ -149,42 +158,70 @@ class AlsaMidi:
             self._poll_thread.join(timeout=5)
 
     def _hotplug_loop(self, interval: float):
-        known_devices = set(self.ports.keys())
+        with self._lock:
+            known_ports = set(self.ports.keys())
 
         while self._running:
             try:
-                current = set(self.scan_devices())
+                current_ports = set(self.scan_devices())
 
-                # New devices
-                for name in current - known_devices:
-                    logger.info(f"Device connected: {name}")
-                    port = self.open_port(name)
-                    if port and self.on_device_connected:
-                        self.on_device_connected(name, port)
+                # New devices (ports that appeared)
+                new_ports = current_ports - known_ports
+                for port_name in new_ports:
+                    try:
+                        logger.info(f"Hotplug: device connected — {port_name}")
+                        port = self.open_port(port_name)
+                        if port and self.on_device_connected:
+                            self.on_device_connected(port_name, port)
+                    except Exception as e:
+                        logger.error(f"Hotplug: failed to open new device {port_name}: {e}")
 
-                # Removed devices
-                for name in known_devices - current:
-                    logger.info(f"Device disconnected: {name}")
-                    self._close_port(name)
-                    if self.on_device_disconnected:
-                        self.on_device_disconnected(name)
+                # Removed devices (ports that disappeared)
+                gone_ports = known_ports - current_ports
+                for port_name in gone_ports:
+                    try:
+                        logger.info(f"Hotplug: device disconnected — {port_name}")
+                        self._close_port(port_name)
+                        if self.on_device_disconnected:
+                            self.on_device_disconnected(port_name)
+                    except Exception as e:
+                        logger.error(f"Hotplug: error handling disconnect for {port_name}: {e}")
 
-                known_devices = current
+                known_ports = current_ports
+
             except Exception as e:
                 logger.error(f"Hotplug monitor error: {e}")
 
             time.sleep(interval)
 
     def _close_port(self, port_name: str):
-        port = self.ports.pop(port_name, None)
+        with self._lock:
+            port = self.ports.pop(port_name, None)
         if port:
             try:
                 if port.input_port:
                     port.input_port.close()
+            except Exception as e:
+                logger.debug(f"Error closing input {port_name}: {e}")
+            try:
                 if port.output_port:
                     port.output_port.close()
             except Exception as e:
-                logger.debug(f"Error closing {port_name}: {e}")
+                logger.debug(f"Error closing output {port_name}: {e}")
+
+    def rescan(self) -> list[AlsaPort]:
+        """Full rescan: close all ports and reopen everything.
+        Use this when hotplug detection misses changes."""
+        logger.info("Full MIDI rescan...")
+
+        # Close all existing ports
+        with self._lock:
+            port_names = list(self.ports.keys())
+        for name in port_names:
+            self._close_port(name)
+
+        # Open all discovered devices
+        return self.open_all()
 
     def open_mock_devices(self, names: list[str]) -> list[AlsaPort]:
         """Create fake ports for all names (--mock mode, no hardware needed)."""
@@ -196,7 +233,8 @@ class AlsaMidi:
                 input_port=_MockPort(),
                 output_port=_MockPort(),
             )
-            self.ports[name] = port
+            with self._lock:
+                self.ports[name] = port
             ports.append(port)
         logger.info(f"Mock mode: {len(ports)} virtual devices created")
         return ports
@@ -204,6 +242,8 @@ class AlsaMidi:
     def close_all(self):
         """Close all open ports."""
         self.stop_hotplug_monitor()
-        for name in list(self.ports.keys()):
+        with self._lock:
+            names = list(self.ports.keys())
+        for name in names:
             self._close_port(name)
         logger.info("All MIDI ports closed")
