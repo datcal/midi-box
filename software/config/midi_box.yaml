@@ -1,44 +1,26 @@
-# =============================================================================
-# MIDI Box - Main Configuration
-# =============================================================================
-
-# General settings
-general:
-  default_preset: "default"
-  log_level: "INFO"           # DEBUG, INFO, WARNING, ERROR
-  hotplug_poll_interval: 2.0  # Seconds between USB device scans
-
-# Platform: "auto", "mac", or "pi"
-# auto = detect at runtime
-platform: "auto"
-
-# USB Gadget settings (DAW mode, Pi only)
 gadget:
+  auto_detect_mode: true
   enabled: true
   num_ports: 10
-  auto_detect_mode: true
-
-# Hardware MIDI settings (Pi only - SC16IS752 UARTs)
+general:
+  default_preset: default
+  hotplug_poll_interval: 2.0
+  log_level: INFO
 hardware:
   enabled: true
   uart_chips:
-    - address: 0x48
-      channels: 2
-    - address: 0x49
-      channels: 2
-
-# Web UI settings
+  - address: 72
+    channels: 2
+  - address: 73
+    channels: 2
+platform: auto
 web_ui:
   enabled: true
-  host: "0.0.0.0"
+  host: 0.0.0.0
+  midi_log_max: 500
   port: 8080
-  midi_log_max: 500          # Max MIDI messages kept in memory for the log view
-
-# WiFi Access Point settings (Pi only)
-# Run scripts/setup_wifi_ap.sh once to configure the Pi as a hotspot.
-# iPad/phone connects to this network, then opens the URL below.
 wifi_ap:
-  ssid: "MIDI-BOX"
-  password: "midibox123"
-  ip: "192.168.4.1"          # Pi's static IP in AP mode
   channel: 6
+  ip: 192.168.4.1
+  password: '1231232132132'
+  ssid: MIDI-BOX

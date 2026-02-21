@@ -123,6 +123,92 @@ def create_app(bridge):
             "url":      f"http://{ip}:{port}",
         })
 
+    @app.route("/api/network", methods=["POST"])
+    def api_network_update():
+        import subprocess
+        import threading
+        import yaml
+
+        data = request.json or {}
+        ssid     = str(data.get("ssid", "")).strip()
+        password = str(data.get("password", "")).strip()
+
+        if not ssid or len(ssid) > 32:
+            return jsonify({"ok": False, "error": "SSID must be 1–32 characters"}), 400
+        if len(password) < 8 or len(password) > 63:
+            return jsonify({"ok": False, "error": "Password must be 8–63 characters"}), 400
+
+        # 1. Persist to midi_box.yaml
+        config_path = Path(__file__).resolve().parent.parent / "config" / "midi_box.yaml"
+        try:
+            with open(config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            cfg.setdefault("wifi_ap", {})
+            cfg["wifi_ap"]["ssid"]     = ssid
+            cfg["wifi_ap"]["password"] = password
+            with open(config_path, "w") as f:
+                yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Could not save config: {e}"}), 500
+
+        # 2. Update shared state so QR codes and display refresh immediately
+        wifi = dict(bridge.state.get("wifi_config", {}))
+        wifi["ssid"]     = ssid
+        wifi["password"] = password
+        bridge.state["wifi_config"] = wifi
+
+        # 3. Build and apply the new hostapd config.
+        # Write the full config from our values — avoids needing read access to
+        # the existing file (which is root-only). Requires sudoers entry written
+        # by pi_setup.sh:
+        #   <user> ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/hostapd/hostapd.conf
+        #   <user> ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart hostapd
+        channel = cfg.get("wifi_ap", {}).get("channel", 6)
+        hostapd_conf_content = (
+            f"interface=uap0\n"
+            f"driver=nl80211\n"
+            f"ssid={ssid}\n"
+            f"hw_mode=g\n"
+            f"channel={channel}\n"
+            f"wmm_enabled=0\n"
+            f"macaddr_acl=0\n"
+            f"auth_algs=1\n"
+            f"ignore_broadcast_ssid=0\n"
+            f"wpa=2\n"
+            f"wpa_passphrase={password}\n"
+            f"wpa_key_mgmt=WPA-PSK\n"
+            f"wpa_pairwise=TKIP\n"
+            f"rsn_pairwise=CCMP\n"
+        )
+
+        live = False
+        try:
+            proc = subprocess.run(
+                ["sudo", "/usr/bin/tee", "/etc/hostapd/hostapd.conf"],
+                input=hostapd_conf_content.encode(),
+                capture_output=True,
+                timeout=5,
+            )
+            live = proc.returncode == 0
+        except Exception:
+            pass
+
+        if live:
+            # Restart hostapd in a background thread so the HTTP response
+            # reaches the browser before the AP drops the connection.
+            def _restart():
+                time.sleep(2)
+                try:
+                    subprocess.run(
+                        ["sudo", "/usr/bin/systemctl", "restart", "hostapd"],
+                        timeout=15,
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=_restart, daemon=True).start()
+
+        return jsonify({"ok": True, "live": live})
+
     @app.route("/api/qr/<qr_type>.svg")
     def api_qr(qr_type):
         cfg  = _state().get("wifi_config", {})

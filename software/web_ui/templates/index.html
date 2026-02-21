@@ -311,6 +311,24 @@
               Scan the WiFi QR with your iPhone camera to join the network,<br>
               then scan the URL QR to open the control interface.
             </p>
+            <form onsubmit="return saveWifi(event)" style="margin-top:16px; border-top:1px solid var(--border); padding-top:14px;">
+              <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:10px;">Change WiFi Credentials</div>
+              <div class="connect-row">
+                <span class="connect-label">SSID</span>
+                <input type="text" id="wifi-ssid-input" maxlength="32" placeholder="Network name" style="width:160px;">
+              </div>
+              <div class="connect-row" style="margin-top:6px;">
+                <span class="connect-label">Password</span>
+                <input type="password" id="wifi-pass-input" minlength="8" maxlength="63" placeholder="Min 8 characters" style="width:160px;">
+              </div>
+              <div class="connect-row" style="margin-top:10px;">
+                <span class="connect-label"></span>
+                <div style="display:flex; gap:10px; align-items:center;">
+                  <button type="submit" class="btn btn-accent btn-sm">Save &amp; Apply</button>
+                  <span id="wifi-save-msg" style="font-size:11px;"></span>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       </div>

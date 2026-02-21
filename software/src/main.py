@@ -71,6 +71,7 @@ class MidiBox:
         self.alsa = AlsaMidi(
             on_device_connected=self._on_usb_device_connected,
             on_device_disconnected=self._on_usb_device_disconnected,
+            on_message=self._on_usb_midi_received,
         )
         self.hw = None       # HardwareMidi, Pi only
         self.gadget = None   # GadgetMidi, Pi only
@@ -86,7 +87,6 @@ class MidiBox:
         self._running = False
         self._web_process = None
         self.bridge = None
-        self._ports_dirty = True  # signals _main_loop to refresh its cached port list
 
     def start(self):
         self.log_buffer.install()
@@ -159,6 +159,7 @@ class MidiBox:
         self._running = True
         logger.info("Routing engine running. Press Ctrl+C to stop.")
         logger.info(f"Web UI: http://localhost:{self.args.port}")
+        self._set_realtime_priority()
         self._main_loop()
 
     def stop(self):
@@ -367,34 +368,14 @@ class MidiBox:
     # -------------------------------------------------------------------
 
     def _main_loop(self):
+        # USB MIDI messages arrive via _on_usb_midi_received (rtmidi callback thread).
+        # HW MIDI messages arrive via _on_hw_midi_received (hw_midi read thread).
+        # This loop only handles IPC commands, gadget polling, and periodic state pushes.
         last_state_update = 0.0
-        cached_ports: list[str] = []
-        port_to_name: dict[str, str] = {}
-
         while self._running:
-            had_messages = False
-
-            # Refresh port list only on hotplug (avoids lock + list alloc every loop)
-            if self._ports_dirty:
-                cached_ports = self.alsa.get_input_ports()
-                port_to_name.clear()
-                self._ports_dirty = False
-
-            # Read from all USB MIDI input ports
-            for port_name in cached_ports:
-                if port_name not in port_to_name:
-                    device = self.registry.find_by_port_id(port_name)
-                    port_to_name[port_name] = device.name if device else port_name
-                source_name = port_to_name[port_name]
-                for msg in self.alsa.receive(port_name):
-                    had_messages = True
-                    self.midi_logger.log_input(source_name, msg)
-                    self.router.process_message(source_name, msg)
-
-            # Read from USB gadget (Mac → Pi)
+            # Read from USB gadget (Mac → Pi in DAW mode; different mechanism from rtmidi)
             if self.gadget and self.mode == "daw":
                 for msg in self.gadget.receive_from_host():
-                    had_messages = True
                     self.midi_logger.log_input("Logic Pro", msg)
                     self.router.process_message("Logic Pro", msg)
 
@@ -407,9 +388,7 @@ class MidiBox:
                 self._update_shared_state()
                 last_state_update = now
 
-            # Only sleep when idle — skip the sleep entirely when messages are flowing
-            if not had_messages:
-                time.sleep(0.001)
+            time.sleep(0.001)
 
     # -------------------------------------------------------------------
     # IPC: Command processing
@@ -792,6 +771,42 @@ class MidiBox:
     # Callbacks
     # -------------------------------------------------------------------
 
+    def _on_usb_midi_received(self, port_name: str, message):
+        """Called from rtmidi's thread immediately when a USB MIDI message arrives."""
+        device = self.registry.find_by_port_id(port_name)
+        source_name = device.name if device else port_name
+        self.midi_logger.log_input(source_name, message)
+        self.router.process_message(source_name, message)
+
+    def _set_realtime_priority(self):
+        """Switch this thread to SCHED_FIFO real-time scheduling (Pi only).
+
+        Requires either root or the systemd unit to set:
+            LimitRTPRIO=70
+            LimitMEMLOCK=infinity
+        """
+        if self.platform != "pi":
+            return
+        try:
+            param = os.sched_param(sched_priority=70)
+            os.sched_setscheduler(0, os.SCHED_FIFO, param)
+
+            # Lock all current and future memory pages to eliminate page-fault spikes.
+            import ctypes
+            import ctypes.util
+            libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+            MCL_CURRENT, MCL_FUTURE = 1, 2
+            libc.mlockall(MCL_CURRENT | MCL_FUTURE)
+
+            logger.info("Real-time scheduling active: SCHED_FIFO priority 70, memory locked")
+        except PermissionError:
+            logger.warning(
+                "Could not set SCHED_FIFO — add to systemd unit: "
+                "LimitRTPRIO=70 and LimitMEMLOCK=infinity"
+            )
+        except Exception as e:
+            logger.warning(f"Real-time scheduling not available: {e}")
+
     def _send_midi(self, destination: str, message) -> bool:
         device = self.registry.get_device(destination)
 
@@ -825,7 +840,6 @@ class MidiBox:
         device = self.registry.register_usb_device(port.port_name, port_name)
         if device:
             logger.info(f"Hotplug: {device.name} connected (port: {port_name})")
-        self._ports_dirty = True
 
     def _on_usb_device_disconnected(self, port_name: str):
         device = self.registry.find_by_port_id(port_name)
@@ -835,7 +849,6 @@ class MidiBox:
         else:
             self.registry.unregister_device(port_name)
             logger.info(f"Hotplug: {port_name} disconnected")
-        self._ports_dirty = True
 
 
 # ---------------------------------------------------------------------------

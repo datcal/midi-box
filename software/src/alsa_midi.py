@@ -30,13 +30,20 @@ class AlsaPort:
 
 
 class AlsaMidi:
-    def __init__(self, on_device_connected=None, on_device_disconnected=None):
+    def __init__(self, on_device_connected=None, on_device_disconnected=None, on_message=None):
         self.ports: dict[str, AlsaPort] = {}
         self.on_device_connected = on_device_connected
         self.on_device_disconnected = on_device_disconnected
+        self._on_message = on_message  # callback(port_name, msg) — fired from rtmidi's thread
         self._poll_thread: threading.Thread | None = None
         self._running = False
         self._lock = threading.Lock()
+
+    def _make_port_callback(self, port_name: str):
+        """Return a mido-compatible callback that tags messages with the port name."""
+        def cb(msg):
+            self._on_message(port_name, msg)
+        return cb
 
     def scan_devices(self) -> list[str]:
         """Scan for available MIDI input and output ports."""
@@ -83,7 +90,8 @@ class AlsaMidi:
 
         try:
             if port_name in inputs:
-                port.input_port = mido.open_input(port_name)
+                cb = self._make_port_callback(port_name) if self._on_message else None
+                port.input_port = mido.open_input(port_name, callback=cb)
                 logger.debug(f"Opened input: {port_name}")
         except Exception as e:
             logger.error(f"Failed to open input {port_name}: {e}")

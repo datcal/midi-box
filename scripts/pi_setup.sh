@@ -189,6 +189,17 @@ log "Service installed and enabled: midi-box.service"
 info "  Control: sudo systemctl {start|stop|restart|status} midi-box"
 info "  Logs:    sudo journalctl -u midi-box -f"
 
+# Sudoers: allow the service user to update hostapd config and restart it
+# without a password — needed for the web UI WiFi credential editor.
+SUDOERS_FILE="/etc/sudoers.d/midi-box-wifi"
+cat > "$SUDOERS_FILE" << EOF
+# MIDI Box — allow web UI to update WiFi AP credentials without a password
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/hostapd/hostapd.conf
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart hostapd
+EOF
+chmod 0440 "$SUDOERS_FILE"
+log "Sudoers entry written: $SUDOERS_FILE"
+
 # ---------------------------------------------------------------------------
 # 6. WiFi Access Point
 # ---------------------------------------------------------------------------

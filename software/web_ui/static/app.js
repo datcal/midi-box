@@ -601,6 +601,54 @@ async function loadSettings() {
   document.getElementById('connect-url').textContent   = netData.url;
   document.getElementById('connect-wifi-text').textContent = netData.ssid;
   document.getElementById('connect-url-text').textContent  = netData.url;
+
+  // Pre-fill the WiFi edit form with current SSID (leave password blank)
+  document.getElementById('wifi-ssid-input').value = netData.ssid;
+  document.getElementById('wifi-pass-input').value = '';
+  document.getElementById('wifi-save-msg').textContent = '';
+}
+
+async function saveWifi(e) {
+  e.preventDefault();
+  const ssid     = document.getElementById('wifi-ssid-input').value.trim();
+  const password = document.getElementById('wifi-pass-input').value;
+  const msg      = document.getElementById('wifi-save-msg');
+
+  msg.textContent = 'Saving…';
+  msg.style.color = 'var(--text-muted)';
+
+  const result = await api('/network', { method: 'POST', body: { ssid, password } });
+  if (result.ok) {
+    loadSettings();  // refresh QR codes and displayed credentials
+    if (result.live) {
+      _wifiRestartCountdown(ssid, password, msg);
+    } else {
+      msg.textContent = 'Saved — restart Pi to apply.';
+      msg.style.color = 'var(--success, #4caf50)';
+    }
+  } else {
+    msg.textContent = result.error || 'Failed to save.';
+    msg.style.color = 'var(--error, #f44336)';
+  }
+  return false;
+}
+
+function _wifiRestartCountdown(ssid, password, msg) {
+  // Server delays the hostapd restart by 2s so the HTTP response arrives first.
+  // Count down so the user knows to reconnect before the network drops.
+  let secs = 2;
+  function tick() {
+    if (secs > 0) {
+      msg.textContent = `WiFi restarting in ${secs}s…`;
+      msg.style.color = 'var(--text-muted)';
+      secs--;
+      setTimeout(tick, 1000);
+    } else {
+      msg.innerHTML = `Reconnect to: <strong>${ssid}</strong> &nbsp; pw: <strong>${password}</strong>`;
+      msg.style.color = 'var(--success, #4caf50)';
+    }
+  }
+  tick();
 }
 
 async function setClockSource() {
