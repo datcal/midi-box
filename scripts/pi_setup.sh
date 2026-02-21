@@ -128,6 +128,7 @@ apt-get install -y -qq \
     python3-rtmidi \
     libasound2-dev \
     hostapd dnsmasq \
+    avahi-daemon avahi-utils \
     chromium xorg openbox unclutter \
     git curl
 

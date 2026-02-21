@@ -97,8 +97,10 @@ cat > /etc/dnsmasq.conf << EOF
 interface=${AP_IFACE}
 bind-interfaces
 dhcp-range=${DHCP_START},${DHCP_END},${NETMASK},24h
-domain=local
-address=/midi-box.local/${AP_IP}
+
+# Do NOT touch .local — it belongs to mDNS/Bonjour (Avahi + zeroconf)
+# Without this, dnsmasq hijacks .local and breaks RTP-MIDI discovery
+server=/local/
 EOF
 
 # --- hostapd: WiFi broadcast on uap0 ---
@@ -127,8 +129,26 @@ elif ! grep -q 'DAEMON_CONF=' /etc/default/hostapd 2>/dev/null; then
   echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' >> /etc/default/hostapd
 fi
 
+# --- Configure Avahi for mDNS on the AP interface ---
+echo "[6/7] Configuring Avahi (mDNS/Bonjour) for ${AP_IFACE}..."
+mkdir -p /etc/avahi
+if [ -f /etc/avahi/avahi-daemon.conf ]; then
+  # Ensure Avahi allows uap0 and enables reflector so hotspot clients
+  # can discover Bonjour services (RTP-MIDI)
+  sed -i 's/^#*allow-interfaces=.*/allow-interfaces=wlan0,'"${AP_IFACE}"'/' /etc/avahi/avahi-daemon.conf
+  if ! grep -q "allow-interfaces=" /etc/avahi/avahi-daemon.conf; then
+    sed -i '/^\[server\]/a allow-interfaces=wlan0,'"${AP_IFACE}" /etc/avahi/avahi-daemon.conf
+  fi
+  # Enable reflector so mDNS works across wlan0 ↔ uap0
+  sed -i 's/^#*enable-reflector=.*/enable-reflector=yes/' /etc/avahi/avahi-daemon.conf
+  if ! grep -q "enable-reflector=" /etc/avahi/avahi-daemon.conf; then
+    sed -i '/^\[reflector\]/a enable-reflector=yes' /etc/avahi/avahi-daemon.conf
+  fi
+fi
+systemctl enable avahi-daemon
+
 # --- Enable services on boot ---
-echo "[6/6] Enabling services..."
+echo "[7/7] Enabling services..."
 systemctl unmask hostapd
 systemctl enable hostapd
 systemctl enable dnsmasq
