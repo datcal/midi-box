@@ -66,6 +66,15 @@ class MidiRouter:
         self._clock_source: str | None = None
         self._clock_callback = None  # fn(mido.Message) for clip launcher
         self._running = False
+        self._routes_by_source: dict[str, list[Route]] = {}  # O(1) source lookup
+
+    def _rebuild_index(self):
+        """Rebuild the source→routes lookup dict. Called after any route change.
+        Assignment is atomic in CPython so no lock needed for readers."""
+        index: dict[str, list[Route]] = {}
+        for r in self.routes:
+            index.setdefault(r.source, []).append(r)
+        self._routes_by_source = index
 
     def set_send_callback(self, callback):
         """
@@ -95,6 +104,7 @@ class MidiRouter:
         )
         with self._lock:
             self.routes.append(route)
+        self._rebuild_index()
         logger.info(f"Route added: {route.name}")
         return route
 
@@ -108,6 +118,7 @@ class MidiRouter:
             ]
             removed = before - len(self.routes)
         if removed:
+            self._rebuild_index()
             logger.info(f"Removed {removed} route(s): {source} -> {destination}")
         return removed > 0
 
@@ -116,6 +127,7 @@ class MidiRouter:
         with self._lock:
             count = len(self.routes)
             self.routes.clear()
+        self._rebuild_index()
         logger.info(f"Cleared {count} routes")
 
     def process_message(self, source_name: str, message: mido.Message):
@@ -134,20 +146,17 @@ class MidiRouter:
             if self._clock_callback and message.type in ("clock", "start", "stop", "continue"):
                 self._clock_callback(message)
 
-        # Find matching routes
-        with self._lock:
-            matching = [r for r in self.routes if r.source == source_name and r.enabled]
-
-        if not matching:
+        # O(1) source lookup — index rebuilt atomically on route changes
+        routes_for_source = self._routes_by_source.get(source_name)
+        if not routes_for_source:
             return
 
-        for route in matching:
-            # Apply filter
+        for route in routes_for_source:
+            if not route.enabled:
+                continue
             filtered = route.midi_filter.apply(message)
             if filtered is None:
                 continue
-
-            # Send to destination
             self._send(route.destination, filtered)
 
     def _send(self, destination: str, message: mido.Message):
@@ -187,15 +196,19 @@ class MidiRouter:
         Each dict: {from, to, filter: {...}, name?}
         """
         self.clear_routes()
-        for rd in route_defs:
-            filter_data = rd.get("filter", {})
-            midi_filter = MidiFilter.from_dict(filter_data) if filter_data else MidiFilter.pass_all()
-            self.add_route(
-                source=rd["from"],
-                destination=rd["to"],
-                midi_filter=midi_filter,
-                name=rd.get("name", ""),
-            )
+        with self._lock:
+            for rd in route_defs:
+                filter_data = rd.get("filter", {})
+                midi_filter = MidiFilter.from_dict(filter_data) if filter_data else MidiFilter.pass_all()
+                route = Route(
+                    source=rd["from"],
+                    destination=rd["to"],
+                    midi_filter=midi_filter,
+                    name=rd.get("name", ""),
+                )
+                self.routes.append(route)
+                logger.info(f"Route added: {route.name}")
+        self._rebuild_index()  # build once for all routes
 
     def dump_routes(self) -> list[dict]:
         """Serialize current routes for saving."""

@@ -86,6 +86,7 @@ class MidiBox:
         self._running = False
         self._web_process = None
         self.bridge = None
+        self._ports_dirty = True  # signals _main_loop to refresh its cached port list
 
     def start(self):
         self.log_buffer.install()
@@ -367,19 +368,33 @@ class MidiBox:
 
     def _main_loop(self):
         last_state_update = 0.0
+        cached_ports: list[str] = []
+        port_to_name: dict[str, str] = {}
+
         while self._running:
+            had_messages = False
+
+            # Refresh port list only on hotplug (avoids lock + list alloc every loop)
+            if self._ports_dirty:
+                cached_ports = self.alsa.get_input_ports()
+                port_to_name.clear()
+                self._ports_dirty = False
+
             # Read from all USB MIDI input ports
-            for port_name in self.alsa.get_input_ports():
-                msg = self.alsa.receive(port_name)
-                if msg:
+            for port_name in cached_ports:
+                if port_name not in port_to_name:
                     device = self.registry.find_by_port_id(port_name)
-                    source_name = device.name if device else port_name
+                    port_to_name[port_name] = device.name if device else port_name
+                source_name = port_to_name[port_name]
+                for msg in self.alsa.receive(port_name):
+                    had_messages = True
                     self.midi_logger.log_input(source_name, msg)
                     self.router.process_message(source_name, msg)
 
             # Read from USB gadget (Mac → Pi)
             if self.gadget and self.mode == "daw":
                 for msg in self.gadget.receive_from_host():
+                    had_messages = True
                     self.midi_logger.log_input("Logic Pro", msg)
                     self.router.process_message("Logic Pro", msg)
 
@@ -392,7 +407,9 @@ class MidiBox:
                 self._update_shared_state()
                 last_state_update = now
 
-            time.sleep(0.001)
+            # Only sleep when idle — skip the sleep entirely when messages are flowing
+            if not had_messages:
+                time.sleep(0.001)
 
     # -------------------------------------------------------------------
     # IPC: Command processing
@@ -512,10 +529,17 @@ class MidiBox:
                 "clock_source": params.get("clock_source"),
             }
             ok = self.presets.save(name, preset)
+            if ok:
+                self.presets.current_preset = name
+                self.state.set_preset(name)
             return {"ok": ok, "name": name}
 
         elif action == "preset.delete":
-            ok = self.presets.delete(params["name"])
+            deleted_name = params["name"]
+            ok = self.presets.delete(deleted_name)
+            if ok and self.presets.current_preset == deleted_name:
+                self.presets.current_preset = None
+                self.state.set_preset(None)
             return {"ok": ok}
 
         # --- Settings ---
@@ -801,6 +825,7 @@ class MidiBox:
         device = self.registry.register_usb_device(port.port_name, port_name)
         if device:
             logger.info(f"Hotplug: {device.name} connected (port: {port_name})")
+        self._ports_dirty = True
 
     def _on_usb_device_disconnected(self, port_name: str):
         device = self.registry.find_by_port_id(port_name)
@@ -810,6 +835,7 @@ class MidiBox:
         else:
             self.registry.unregister_device(port_name)
             logger.info(f"Hotplug: {port_name} disconnected")
+        self._ports_dirty = True
 
 
 # ---------------------------------------------------------------------------

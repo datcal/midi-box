@@ -159,14 +159,21 @@ class MidiPlayer:
 
     def _play_loop(self, filepath: str):
         """Background thread: play the MIDI file with tempo control."""
+        # Pre-load all messages once to avoid re-reading disk on every loop restart
+        try:
+            mid = mido.MidiFile(filepath)
+            messages = list(mid)
+        except Exception as e:
+            logger.error(f"Failed to load MIDI file: {e}")
+            self._running = False
+            return
+
         while self._running:
             try:
-                mid = mido.MidiFile(filepath)
                 self._position = 0.0
                 start_time = time.time()
 
-                # Iterate messages manually for tempo control
-                for msg in mid:
+                for msg in messages:
                     if not self._running:
                         return
 

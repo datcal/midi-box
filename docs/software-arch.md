@@ -4,10 +4,10 @@
 
 The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 1. USB MIDI device management (via ALSA)
-2. Hardware MIDI I/O (via SC16IS752 UARTs)
+2. Hardware MIDI OUT (via Pi native UARTs at 31250 baud)
 3. MIDI message routing between any port
 4. USB gadget mode (appearing as MIDI device to Mac)
-5. User interface (OLED + web)
+5. User interface (web UI + touchscreen kiosk)
 
 ## System Diagram
 
@@ -15,11 +15,11 @@ The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 ┌─────────────────────────────────────────────────────────┐
 │                    Application Layer                     │
 │                                                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-│  │ Web UI   │  │ OLED UI  │  │ Preset   │  │ Mode   │ │
-│  │ (Flask)  │  │ (display)│  │ Manager  │  │ Switch │ │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └───┬────┘ │
-│       └──────────────┴─────────────┴─────────────┘      │
+│  ┌──────────┐  ┌──────────────────┐  ┌────────────────┐ │
+│  │ Web UI   │  │  Clip Launcher   │  │  MIDI Player   │ │
+│  │ (Flask)  │  │  (clip_launcher) │  │  (midi_player) │ │
+│  └────┬─────┘  └────────┬─────────┘  └───────┬────────┘ │
+│       └─────────────────┴─────────────────────┘          │
 │                          │                               │
 │  ┌───────────────────────┴───────────────────────────┐  │
 │  │              Routing Engine (router.py)            │  │
@@ -35,17 +35,17 @@ The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 │  │  USB MIDI Layer     │  │  Hardware MIDI Layer     │  │
 │  │  (alsa_midi.py)     │  │  (hw_midi.py)            │  │
 │  │                     │  │                           │  │
-│  │  - ALSA sequencer   │  │  - SC16IS752 driver      │  │
+│  │  - ALSA sequencer   │  │  - Pi native UARTs       │  │
 │  │  - Device hotplug   │  │  - 31250 baud serial     │  │
-│  │  - Port enumeration │  │  - Pi native UART        │  │
+│  │  - Port enumeration │  │  - MIDI OUT only         │  │
 │  └──────────┬──────────┘  └───────┬──────────────────┘  │
 │             │                      │                     │
 │  ┌──────────┴──────────┐  ┌───────┴──────────────────┐  │
-│  │  USB Gadget Layer   │  │  GPIO / I2C              │  │
-│  │  (gadget.py)        │  │  (Linux kernel drivers)  │  │
+│  │  USB Gadget Layer   │  │  Pi Device Tree Overlays │  │
+│  │  (gadget.py)        │  │  (kernel / config.txt)   │  │
 │  │                     │  │                           │  │
-│  │  - libcomposite     │  │  - sc16is7xx driver      │  │
-│  │  - MIDI function    │  │  - device tree overlay   │  │
+│  │  - libcomposite     │  │  - uart3/uart4/uart5      │  │
+│  │  - MIDI function    │  │  - disable-bt (UART0)     │  │
 │  │  - Mac ↔ Pi bridge  │  │                           │  │
 │  └─────────────────────┘  └──────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -56,63 +56,84 @@ The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 ```
 software/
 ├── src/
-│   ├── main.py              ← Entry point, mode detection, startup
+│   ├── main.py              ← Entry point, process spawner, main MIDI loop
 │   ├── router.py            ← Core routing engine
 │   ├── alsa_midi.py         ← USB MIDI port management via ALSA
-│   ├── hw_midi.py           ← Hardware MIDI (SC16IS752 + native UART)
+│   ├── hw_midi.py           ← Hardware MIDI OUT via Pi native UARTs
 │   ├── gadget.py            ← USB gadget MIDI device management
 │   ├── preset_manager.py    ← Load/save/switch routing presets
-│   ├── ui_oled.py           ← OLED display + rotary encoder interface
-│   ├── ui_web.py            ← Flask web interface
+│   ├── clip_launcher.py     ← Ableton-style clip session, 96 PPQ clock
+│   ├── midi_player.py       ← MIDI file playback with tempo/loop control
+│   ├── midi_logger.py       ← Ring buffer MIDI monitor (thread-safe)
+│   ├── ui_web.py            ← Flask web interface + REST API
+│   ├── ipc.py               ← IPC bridge (shared state, command queue)
 │   ├── device_registry.py   ← Known device database & naming
+│   ├── state.py             ← Persist/restore app state to JSON
 │   └── midi_filter.py       ← Channel/message type filtering
 ├── config/
 │   ├── devices.yaml         ← Device name mapping (USB ID → friendly name)
 │   ├── midi_box.yaml        ← Main configuration file
 │   └── gadget_config.sh     ← USB gadget setup script
 ├── presets/
-│   ├── default.json         ← Default startup routing
-│   ├── live_keys.json       ← KeyLab → all synths
-│   ├── sequencer.json       ← KeyStep → Volcas + MS-20
-│   ├── recording.json       ← Everything → Logic Pro
-│   └── sp404_live.json      ← SP-404 centered live setup
+│   └── *.json               ← Named routing presets
+├── data/
+│   ├── state.json           ← Persisted app state (routes, preset, overrides)
+│   └── midi_files/          ← Uploaded MIDI files for player/launcher
 └── web_ui/
     ├── templates/
-    │   └── index.html       ← Patchbay-style routing UI
+    │   ├── index.html       ← Main SPA (all pages)
+    │   └── display.html     ← Kiosk display (QR + status)
     └── static/
         ├── style.css
-        └── patchbay.js      ← Interactive routing matrix
+        └── app.js
 ```
 
 ## Key Design Decisions
 
-### 1. Routing Engine
-- Central routing table: list of `(source_port, dest_port, filter)` tuples
-- Runs in a tight loop reading all inputs and forwarding to mapped outputs
-- Filters applied per-route: channel, message type, velocity range
-- Thread per input port for lowest latency
+### 1. Dual-Process Architecture
+- **Process 1 (MIDI engine)**: owns all hardware — ALSA ports, serial UARTs, USB gadget. Runs the real-time routing loop.
+- **Process 2 (Flask)**: reads shared state, sends commands via queue. Never touches hardware directly.
+- IPC: `multiprocessing.Manager` dict (state) + Queue (commands) + results dict.
 
-### 2. USB MIDI via ALSA
-- Use `rtmidi` Python library (wraps ALSA sequencer)
-- Auto-detect USB MIDI devices on hotplug via `udev` rules
-- Map USB vendor/product IDs to friendly names (e.g., `0x1c75:0x0206` → "KeyLab 88 MK2")
+### 2. Main Loop — Non-Blocking Poll
+```python
+while running:
+    for port_name in alsa.get_input_ports():
+        for msg in alsa.receive(port_name):   # drains all pending messages at once
+            router.process_message(source, msg)
+    process_commands()
+    if state_update_due:
+        push_shared_state()
+    time.sleep(0.001)
+```
+All pending messages per port are drained in a single `iter_pending()` call each iteration, so simultaneous notes (chords, player bursts) are processed without per-message polling delay.
 
-### 3. Hardware MIDI via SC16IS752
-- Linux has a built-in `sc16is7xx` kernel driver
-- Creates `/dev/ttySC0`, `/dev/ttySC1`, etc.
-- Access via `pyserial` at 31250 baud
-- No custom driver needed
+### 3. USB MIDI via ALSA
+- `rtmidi` Python library (wraps ALSA sequencer)
+- Auto-detect USB MIDI devices on hotplug via background polling thread (2s interval)
+- Map ALSA port names to friendly names via `devices.yaml`
 
-### 4. USB Gadget Mode
-- Use `libcomposite` kernel module to create a USB MIDI gadget
-- Appears to Mac as class-compliant USB MIDI device
-- Create multiple MIDI ports (one per connected device)
-- Bridge: gadget port ↔ routing engine ↔ hardware port
+### 4. Hardware MIDI via Pi Native UARTs
+- Pi 4 has 6 UARTs; 4 enabled via device tree overlays in `/boot/firmware/config.txt`
+- `disable-bt` frees UART0 (GPIO 14 → `/dev/ttyAMA0`)
+- `uart3/uart4/uart5` overlays → GPIO 4/8/12 → `/dev/ttyAMA2/3/4`
+- Access via `pyserial` at 31250 baud, non-blocking reads (`timeout=0`)
+- All 4 DIN ports are MIDI OUT only
 
-### 5. Mode Detection
+### 5. USB Gadget Mode
+- `libcomposite` kernel module creates a USB MIDI gadget
+- Pi appears to Mac as a class-compliant USB MIDI device
+- Bridge: Mac → gadget port → routing engine → hardware ports (and vice versa)
+
+### 6. Clip Launcher Clock
+- Internal clock thread ticks at 96 PPQ (4× MIDI standard 24 PPQ)
+- MIDI clock (0xF8) emitted every 4 internal ticks = standard 24 PPQ output
+- Clip launches quantized to beat/bar/2bar/4bar boundaries
+- External clock mode: syncs to incoming MIDI clock from any device
+
+### 7. Mode Detection
 ```python
 def detect_mode():
-    """Check if USB-C is connected to a host"""
     # Check USB gadget UDC state
     udc_state = read_file("/sys/class/udc/fe980000.usb/state")
     if udc_state.strip() == "configured":
@@ -128,39 +149,39 @@ usb_devices:
   "1c75:0206":
     name: "KeyLab 88 MK2"
     type: controller
-    ports: 1
+    direction: both
   "1c75:0288":
     name: "KeyStep"
-    type: controller_sequencer
-    ports: 1
+    type: controller
+    direction: both
   "1397:00d2":
     name: "Behringer Model D"
     type: synth
-    ports: 1
+    direction: both
   "0582:0191":
     name: "Roland JP-08"
     type: synth
-    ports: 1
+    direction: both
   "1c75:0207":
-    name: "MicroBrute"
+    name: "Arturia MicroBrute"
     type: synth
-    ports: 1
+    direction: both
   "0582:01e5":
-    name: "SP-404 MK2"
+    name: "Roland SP-404 MK2"
     type: sampler
-    ports: 1
+    direction: both
 
 hardware_ports:
-  ttySC0:
+  ttyAMA0:
     name: "MS-20 Mini"
     direction: out
-  ttySC1:
+  ttyAMA2:
     name: "Volca 1"
     direction: out
-  ttySC2:
+  ttyAMA3:
     name: "Volca 2"
     direction: out
-  ttySC3:
+  ttyAMA4:
     name: "Volca 3"
     direction: out
 ```
@@ -174,60 +195,40 @@ hardware_ports:
     {
       "from": "KeyLab 88 MK2",
       "to": "MS-20 Mini",
-      "filter": { "channel": 1 }
-    },
-    {
-      "from": "KeyLab 88 MK2",
-      "to": "Behringer Model D",
-      "filter": { "channel": 2 }
+      "filter": { "channels": [1] }
     },
     {
       "from": "KeyLab 88 MK2",
       "to": "Roland JP-08",
-      "filter": { "channel": 3 }
+      "filter": { "channels": [3] }
     },
     {
       "from": "KeyStep",
       "to": "Volca 1",
-      "filter": { "channel": 4 }
-    },
-    {
-      "from": "KeyStep",
-      "to": "Volca 2",
-      "filter": { "channel": 5 }
-    },
-    {
-      "from": "KeyStep",
-      "to": "Volca 3",
-      "filter": { "channel": 6 }
-    },
-    {
-      "from": "SP-404 MK2",
-      "to": "MicroBrute",
-      "filter": { "channel": 10 }
+      "filter": { "channels": [4] }
     }
   ],
   "clock_source": "KeyStep"
 }
 ```
 
+Filter fields: `channels` (list, 1-16), `remap_channel` (1-16), `message_types` (list: `"note"`, `"cc"`, `"program_change"`, `"pitchwheel"`, `"aftertouch"`, `"clock"`, `"sysex"`), `velocity_min/max` (0-127), `cc_numbers` (list), `block_clock` (bool), `block_sysex` (bool).
+
 ## Dependencies
 
 ```
-# Python packages
 mido>=1.3.0          # MIDI message handling
 python-rtmidi>=1.5.0 # ALSA MIDI backend
-pyserial>=3.5        # Hardware UART (SC16IS752)
+pyserial>=3.5        # Hardware UART (Pi native)
 flask>=3.0           # Web UI
 pyyaml>=6.0          # Configuration files
-luma.oled>=3.13      # OLED display driver
-RPi.GPIO>=0.7        # GPIO access (encoder, LEDs)
-smbus2>=0.4          # I2C access (if needed directly)
+psutil>=5.9          # System stats (CPU, RAM, disk)
 ```
 
-## Systemd Services
+## Systemd Service
 
-### midi-box.service (main application)
+Single service — Flask runs as a subprocess of the MIDI engine (not a separate service).
+
 ```ini
 [Unit]
 Description=MIDI Box Router
@@ -236,9 +237,9 @@ After=network.target sound.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/midi-box
-ExecStartPre=/opt/midi-box/config/gadget_config.sh
-ExecStart=/usr/bin/python3 /opt/midi-box/src/main.py
+WorkingDirectory=/opt/midi-box/software
+ExecStartPre=/opt/midi-box/software/config/gadget_config.sh
+ExecStart=/opt/midi-box/software/venv/bin/python3 src/main.py
 Restart=always
 RestartSec=3
 
@@ -246,29 +247,15 @@ RestartSec=3
 WantedBy=multi-user.target
 ```
 
-### midi-box-web.service (web UI)
-```ini
-[Unit]
-Description=MIDI Box Web Interface
-After=midi-box.service
+Kiosk display is a separate service (`midi-box-kiosk.service`) managed by `pi_setup.sh`.
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/midi-box
-ExecStart=/usr/bin/python3 /opt/midi-box/src/ui_web.py
-Restart=always
+## Latency
 
-[Install]
-WantedBy=multi-user.target
-```
-
-## Latency Targets
-
-| Path | Target | Notes |
+| Path | Typical | Notes |
 |---|---|---|
-| USB → USB | < 2ms | ALSA handles this well |
-| USB → 5-Pin | < 3ms | SC16IS752 adds ~1ms |
-| 5-Pin → USB | < 3ms | Same |
-| USB → Mac (gadget) | < 3ms | Gadget mode overhead |
-| End-to-end (key press → sound) | < 5ms | Imperceptible |
+| USB → USB | ~2–3ms | USB 2.0 frame (1ms) × 2 + software (~20µs) |
+| USB → 5-Pin DIN | ~3–4ms | + serial TX (~1ms per 3-byte message at 31250 baud) |
+| USB → Mac (gadget) | ~3–4ms | Similar to USB→USB + gadget overhead |
+| End-to-end (key press → sound) | ~5–10ms | Includes destination synth latency |
+
+Serial note: 12 simultaneous notes to a DIN port take ~11.5ms to fully transmit (physics of 31250 baud). USB destinations batch notes efficiently and don't have this constraint.

@@ -124,19 +124,16 @@ class AlsaMidi:
                 logger.error(f"Send failed on {port_name}: {e}")
         return False
 
-    def receive(self, port_name: str, timeout: float = 0) -> mido.Message | None:
-        """Receive a MIDI message from a named port (non-blocking by default)."""
+    def receive(self, port_name: str) -> list[mido.Message]:
+        """Drain all pending MIDI messages from a named port (non-blocking)."""
         with self._lock:
             port = self.ports.get(port_name)
         if port and port.input_port:
             try:
-                if timeout > 0:
-                    return port.input_port.poll()
-                for msg in port.input_port.iter_pending():
-                    return msg
+                return list(port.input_port.iter_pending())
             except Exception as e:
                 logger.debug(f"Receive error on {port_name}: {e}")
-        return None
+        return []
 
     def get_input_ports(self) -> list[str]:
         with self._lock:

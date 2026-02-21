@@ -12,7 +12,7 @@
 #
 # Examples:
 #   sudo bash scripts/inject_sdcard.sh        # defaults to US
-#   sudo bash scripts/inject_sdcard.sh TR     # Turkey
+#   sudo bash scripts/inject_sdcard.sh DE     # Germany
 #   sudo bash scripts/inject_sdcard.sh GB     # United Kingdom
 #
 # Requirements:

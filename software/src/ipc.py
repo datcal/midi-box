@@ -76,6 +76,8 @@ class IpcBridge:
             time.sleep(0.005)
 
         logger.error(f"IPC command timeout: {action}")
+        # Remove stale result if the engine writes it after we gave up
+        self.results.pop(cmd_id, None)
         return {"ok": False, "error": "timeout"}
 
     def close(self):

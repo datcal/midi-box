@@ -6,31 +6,29 @@
 |-----------|-----|---------|-------|
 | Raspberry Pi 4 Model B (2GB+) | 1 | Main processor / router brain | 4GB recommended for web UI |
 | MicroSD Card 16GB+ | 1 | OS + software storage | Class 10 / A1 minimum |
-| Powered USB Hub (7-port) | 1 | Connect USB MIDI devices | **Must be powered**, not bus-powered |
-| 5V 4A Power Supply | 1 | Power the Pi + MIDI board | Powers Pi via GPIO, not USB-C |
-| USB-C to USB-A cable | 1 | Connect Pi USB-C to Mac | For DAW mode (gadget mode) |
+| Waveshare Industrial USB HUB (4× USB 2.0) | 2 | Connect 6 USB MIDI devices (3 per hub) | 5V powered, industrial grade, compact |
+| 5V 5A Power Supply (barrel jack) | 1 | Single power input for whole box | 5V directly powers Pi (GPIO pins) + both hubs — no buck converter needed |
+| USB-C to USB-A cable | 1 | Connect Pi USB-C to Mac | For DAW mode (gadget mode) — USB-C port dedicated to this |
 
-## MIDI I/O Board Components
+## Display
 
 | Component | Qty | Purpose | Notes |
 |-----------|-----|---------|-------|
-| SC16IS752 I2C/SPI-to-UART | 2 | Adds 4 hardware UARTs total | 2 channels each, I2C address configurable |
-| 6N138 Optocoupler | 6 | MIDI IN galvanic isolation | Standard MIDI spec requirement |
-| 5-Pin DIN Female Connector (PCB mount) | 12 | 6x MIDI IN + 6x MIDI OUT | Panel mount recommended |
-| 220 ohm Resistor (1/4W) | 18 | MIDI circuit current limiting | 6 for IN, 12 for OUT |
-| 1N4148 Diode | 6 | MIDI IN protection | Across optocoupler input |
-| 10K ohm Resistor (1/4W) | 6 | Optocoupler pull-up | For 6N138 output |
-| 100nF Ceramic Capacitor | 6 | Decoupling for optocouplers | One per MIDI IN circuit |
-| Perfboard (9x15cm) | 1 | Mount MIDI circuits | Or custom PCB |
-| Pin Headers (male/female) | 1 set | Connect to Pi GPIO | 2.54mm pitch |
-| Hookup Wire (22AWG) | 1 roll | Internal wiring | Solid core for perfboard |
+| 5" DSI Touchscreen 800×480 IPS Capacitive | 1 | Local UI — QR code, routing, launcher | Third-party DSI screen (800×480, 5-point touch). DSI ribbon to Pi. Most work plug-and-play on Pi OS Bookworm; some need a manufacturer-specific dtoverlay — check product wiki. |
+
+## MIDI DIN I/O Components
+
+4× MIDI OUT ports only (MS-20 Mini + 3× Volca). All driven by Pi native hardware UARTs — no external UART bridge chips needed.
+
+| Component | Qty | Purpose | Notes |
+|-----------|-----|---------|-------|
+| 5-Pin DIN Female Connector (PCB mount) | 4 | MIDI OUT ports | One per device (MS-20, Volca ×3) |
+| 220 ohm Resistor (1/4W) | 8 | MIDI OUT current drive | 2 per port (active-drive circuit) |
 
 ## User Interface Components
 
 | Component | Qty | Purpose | Notes |
 |-----------|-----|---------|-------|
-| SSD1306 OLED Display 128x64 | 1 | Show routing info / menus | I2C, 0.96" or 1.3" |
-| Rotary Encoder with Push Button | 1 | Navigate menus / select presets | KY-040 module or bare encoder |
 | LED (green, 3mm) | 10 | MIDI activity indicators | One per port |
 | LED (blue, 3mm) | 2 | Mode indicator (Standalone/DAW) | |
 | 330 ohm Resistor (1/4W) | 12 | LED current limiting | |
@@ -52,42 +50,65 @@
 | Component | Qty | Purpose | Notes |
 |-----------|-----|---------|-------|
 | Dupont Jumper Wires (F-F) | 20 | GPIO connections | 20cm |
-| USB-A to USB-B/Micro cables | 6 | Connect USB MIDI devices | Short 30cm cables to save space |
+| USB-A to USB-A cables | 6 | Connect USB MIDI devices to hubs | Short 30cm cables to save space |
+| DSI Ribbon Cable | 1 | Pi → 5" touchscreen | Usually included with screen; verify before ordering |
 
 ## Port Allocation Plan
 
-### SC16IS752 #1 (I2C Address 0x48)
-| UART Channel | Direction | Assigned To |
-|---|---|---|
-| Channel A | OUT | Korg MS-20 Mini |
-| Channel B | OUT | Korg Volca #1 |
+### Pi Native UARTs (MIDI OUT — enabled via device tree overlays)
 
-### SC16IS752 #2 (I2C Address 0x49)
-| UART Channel | Direction | Assigned To |
-|---|---|---|
-| Channel A | OUT | Korg Volca #2 |
-| Channel B | OUT | Korg Volca #3 |
+| UART | GPIO (TX) | Device Node | Assigned To |
+|------|-----------|-------------|-------------|
+| UART0 | GPIO 14 | /dev/ttyAMA0 | Korg MS-20 Mini |
+| UART3 | GPIO 4 | /dev/ttyAMA2 | Korg Volca #1 |
+| UART4 | GPIO 8 | /dev/ttyAMA3 | Korg Volca #2 |
+| UART5 | GPIO 12 | /dev/ttyAMA4 | Korg Volca #3 |
 
-### Pi Native UART (GPIO 14/15)
-| UART | Direction | Assigned To |
-|---|---|---|
-| UART0 | IN/OUT | Spare Port 1 |
+Required in `/boot/firmware/config.txt`:
+```
+dtoverlay=disable-bt    # frees UART0 (GPIO 14) from Bluetooth
+dtoverlay=uart3         # enables UART3 on GPIO 4/5
+dtoverlay=uart4         # enables UART4 on GPIO 8/9
+dtoverlay=uart5         # enables UART5 on GPIO 12/13
+```
 
-### Extra UART (via additional SC16IS752 or software serial)
-| UART | Direction | Assigned To |
-|---|---|---|
-| Spare | IN/OUT | Spare Port 2 |
+### I2C Bus (GPIO 2/3)
+
+| Device | Address | Purpose |
+|--------|---------|---------|
+| 5" Touchscreen (touch controller) | 0x38 | Touch input (auto via DSI) |
+
+### Reserved GPIO (other)
+
+| GPIO | Purpose |
+|------|---------|
+| 2 / 3 | I2C SDA / SCL |
+| 4 | UART3 TX → Volca #1 |
+| 8 | UART4 TX → Volca #2 |
+| 12 | UART5 TX → Volca #3 |
+| 14 | UART0 TX → MS-20 Mini |
 
 ## Power Budget
 
-| Component | Current Draw |
-|---|---|
-| Raspberry Pi 4 | ~1.0A (idle) - 1.5A (load) |
-| Powered USB Hub | Self-powered (separate PSU) |
-| SC16IS752 x2 | ~10mA |
-| OLED Display | ~20mA |
-| LEDs x12 | ~120mA (10mA each) |
-| 6N138 x6 | ~30mA |
-| **Total** | **~1.7A typical** |
+Single **5V 5A barrel jack** powers everything directly — no buck converter. Pi is powered via GPIO 5V pins (USB-C port kept free for DAW mode / Mac connection).
 
-Recommendation: 5V 4A supply gives plenty of headroom.
+```
+[5V 5A barrel jack]
+        │
+        ├──→ Raspberry Pi 4 (GPIO 5V pins — USB-C kept free for DAW mode)
+        ├──→ Waveshare USB Hub #1 (5V input, 3 MIDI devices)
+        └──→ Waveshare USB Hub #2 (5V input, 3 MIDI devices)
+```
+
+### 5V Draw
+
+| Component | Current draw | Notes |
+|---|---|---|
+| Pi 4 + 5" touchscreen | ~2.0A | Pi ~1.7A + screen ~0.3A |
+| Waveshare Hub #1 (3 USB MIDI devices) | ~0.6A | MIDI devices ~150–200mA each |
+| Waveshare Hub #2 (3 USB MIDI devices) | ~0.6A | MIDI devices ~150–200mA each |
+| LEDs ×12 | ~0.12A | 10mA each |
+| **Realistic total** | **~3.3A** | |
+| **Supply capacity** | **5.0A** | ~1.7A headroom |
+
+> The Waveshare hubs draw their own power from the 5V rail. No charging ports, no idle load — purely USB MIDI instrument connections.

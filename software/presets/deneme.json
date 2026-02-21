@@ -1,0 +1,35 @@
+{
+  "name": "deneme",
+  "description": "deneme cok guzel",
+  "routes": [
+    {
+      "from": "KeyStep",
+      "to": "Roland JP-08",
+      "filter": {},
+      "name": "KeyStep -> Roland JP-08",
+      "enabled": true
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Volca 2",
+      "filter": {},
+      "name": "KeyLab 88 MK2 -> Volca 2",
+      "enabled": true
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Volca 1",
+      "filter": {},
+      "name": "KeyLab 88 MK2 -> Volca 1",
+      "enabled": true
+    },
+    {
+      "from": "KeyLab 88 MK2",
+      "to": "Behringer Model D",
+      "filter": {},
+      "name": "KeyLab 88 MK2 -> Behringer Model D",
+      "enabled": true
+    }
+  ],
+  "clock_source": null
+}

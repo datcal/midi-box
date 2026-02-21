@@ -1,6 +1,13 @@
 """
-Hardware MIDI Layer - Manages 5-pin DIN MIDI via SC16IS752 UARTs and Pi native UART.
+Hardware MIDI Layer - Manages 5-pin DIN MIDI OUT via Pi native UARTs.
+All 4 DIN ports are MIDI OUT only. No SC16IS752 bridge chips needed.
 Communicates over serial at 31250 baud (MIDI standard).
+
+Required /boot/firmware/config.txt overlays:
+    dtoverlay=disable-bt    # frees UART0 (GPIO 14)
+    dtoverlay=uart3         # GPIO 4  → /dev/ttyAMA2
+    dtoverlay=uart4         # GPIO 8  → /dev/ttyAMA3
+    dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA4
 """
 
 import threading
@@ -97,13 +104,12 @@ class HardwareMidiPort:
 class HardwareMidi:
     """Manages all hardware MIDI ports."""
 
-    # Default SC16IS752 serial devices on Raspberry Pi
+    # Pi native UART devices (enabled via device tree overlays)
     DEFAULT_PORTS = [
-        ("/dev/ttySC0", "DIN Port 1", "out"),   # SC16IS752 #1, Channel A
-        ("/dev/ttySC1", "DIN Port 2", "out"),   # SC16IS752 #1, Channel B
-        ("/dev/ttySC2", "DIN Port 3", "out"),   # SC16IS752 #2, Channel A
-        ("/dev/ttySC3", "DIN Port 4", "out"),   # SC16IS752 #2, Channel B
-        ("/dev/ttyAMA0", "DIN Port 5", "both"), # Pi native UART
+        ("/dev/ttyAMA0", "MS-20 Mini", "out"),  # UART0 → GPIO 14 (disable-bt overlay)
+        ("/dev/ttyAMA2", "Volca 1",    "out"),  # UART3 → GPIO 4  (uart3 overlay)
+        ("/dev/ttyAMA3", "Volca 2",    "out"),  # UART4 → GPIO 8  (uart4 overlay)
+        ("/dev/ttyAMA4", "Volca 3",    "out"),  # UART5 → GPIO 12 (uart5 overlay)
     ]
 
     def __init__(self):
@@ -182,11 +188,16 @@ class HardwareMidi:
         ]
 
         while self._running:
+            got_any = False
             for port in input_ports:
                 messages = port.receive()
                 for msg in messages:
+                    got_any = True
                     if self._message_callback:
                         self._message_callback(port.name, msg)
+            # Avoid busy-spin when no messages are arriving
+            if not got_any:
+                time.sleep(0.0005)
 
     def get_output_ports(self) -> list[str]:
         return [

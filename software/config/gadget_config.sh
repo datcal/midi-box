@@ -57,7 +57,8 @@ echo "$NUM_PORTS" > functions/midi.usb0/out_ports  # Ports receiving FROM host (
 # Configuration
 mkdir -p configs/c.1/strings/0x409
 echo "MIDI Configuration" > configs/c.1/strings/0x409/configuration
-echo 500 > configs/c.1/MaxPower  # 500mA max
+echo 0xC0 > configs/c.1/bmAttributes  # Self-powered (bit 6) + reserved bit 7
+echo 0 > configs/c.1/MaxPower          # 0mA from host — Pi is powered via GPIO pins
 
 # Link function to configuration
 ln -s functions/midi.usb0 configs/c.1/

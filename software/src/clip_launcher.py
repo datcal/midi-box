@@ -361,10 +361,8 @@ class ClipLauncher:
             self._send_clip_event(layer, msg)
             clip.event_cursor += 1
 
-        clip.play_head += 1
-
-        # End of clip
-        if clip.play_head > clip.total_ticks:
+        # End of clip: check before advancing so there is no extra tick of silence
+        if clip.play_head >= clip.total_ticks:
             if clip.loop:
                 clip.play_head = 0
                 clip.event_cursor = 0
@@ -372,6 +370,9 @@ class ClipLauncher:
                 self._stop_clip_clean(layer)
                 clip.state = ClipState.STOPPED
                 layer.active_clip = None
+            return
+
+        clip.play_head += 1
 
     def _send_clip_event(self, layer: Layer, msg: mido.Message):
         """Send a MIDI event from a clip, tracking notes."""
@@ -395,7 +396,7 @@ class ClipLauncher:
         """Send note-off for all active notes on this layer."""
         if not self._send_callback:
             return
-        for ch, note in list(layer.active_notes):
+        for ch, note in layer.active_notes:
             try:
                 msg = mido.Message("note_off", channel=ch, note=note, velocity=0)
                 self._send_callback(layer.destination, msg)
@@ -410,10 +411,11 @@ class ClipLauncher:
     def add_layer(self, name: str, destination: str,
                   midi_channel: int | None = None) -> Layer:
         """Add a new layer."""
-        layer_id = len(self.layers)
-        layer = Layer(layer_id=layer_id, name=name, destination=destination,
-                      midi_channel=midi_channel)
-        self.layers.append(layer)
+        with self._lock:
+            layer_id = len(self.layers)
+            layer = Layer(layer_id=layer_id, name=name, destination=destination,
+                          midi_channel=midi_channel)
+            self.layers.append(layer)
         logger.info(f"Layer added: {name} -> {destination}")
         return layer
 

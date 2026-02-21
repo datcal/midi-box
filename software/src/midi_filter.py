@@ -7,6 +7,17 @@ import mido
 from dataclasses import dataclass, field
 
 
+_TYPE_MAP: dict[str, str] = {
+    "note_on": "note",
+    "note_off": "note",
+    "control_change": "cc",
+    "program_change": "program_change",
+    "pitchwheel": "pitchwheel",
+    "aftertouch": "aftertouch",
+    "polytouch": "polytouch",
+}
+
+
 @dataclass
 class MidiFilter:
     """
@@ -77,16 +88,7 @@ class MidiFilter:
 
         # Message type filtering
         if self.message_types:
-            type_map = {
-                "note_on": "note",
-                "note_off": "note",
-                "control_change": "cc",
-                "program_change": "program_change",
-                "pitchwheel": "pitchwheel",
-                "aftertouch": "aftertouch",
-                "polytouch": "polytouch",
-            }
-            msg_category = type_map.get(message.type, message.type)
+            msg_category = _TYPE_MAP.get(message.type, message.type)
             if msg_category not in self.message_types:
                 return None
 

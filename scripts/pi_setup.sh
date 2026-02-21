@@ -121,13 +121,14 @@ log "System packages up to date"
 # ---------------------------------------------------------------------------
 # 3. Install system dependencies
 # ---------------------------------------------------------------------------
-step "3/6  Installing Python + MIDI + networking packages"
+step "3/6  Installing Python + MIDI + networking + kiosk packages"
 
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
     python3-rtmidi \
     libasound2-dev \
     hostapd dnsmasq \
+    chromium-browser xorg openbox unclutter \
     git curl
 
 log "System packages installed"
@@ -191,9 +192,88 @@ info "  Logs:    sudo journalctl -u midi-box -f"
 # ---------------------------------------------------------------------------
 # 6. WiFi Access Point
 # ---------------------------------------------------------------------------
-step "6/6  Configuring WiFi Access Point"
+step "6/7  Configuring WiFi Access Point"
 
 bash "$CONFIG_DIR/setup_wifi_ap.sh"
+
+# ---------------------------------------------------------------------------
+# 7. UART overlays + touchscreen kiosk
+# ---------------------------------------------------------------------------
+step "7/7  Configuring UART overlays and touchscreen kiosk"
+
+BOOT_CONFIG="/boot/firmware/config.txt"
+[[ -f "$BOOT_CONFIG" ]] || BOOT_CONFIG="/boot/config.txt"  # fallback for older Pi OS
+
+# Add UART overlays if not already present
+if ! grep -q "disable-bt" "$BOOT_CONFIG"; then
+    cat >> "$BOOT_CONFIG" << 'EOF'
+
+# MIDI Box — UART overlays for 4x hardware MIDI OUT ports (replaces SC16IS752)
+dtoverlay=disable-bt    # frees UART0 (GPIO 14) from Bluetooth → MS-20 Mini
+dtoverlay=uart3         # GPIO 4  → /dev/ttyAMA2 → Volca #1
+dtoverlay=uart4         # GPIO 8  → /dev/ttyAMA3 → Volca #2
+dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA4 → Volca #3
+
+# Raspberry Pi 7" Official Touchscreen (DSI, auto-detected — no extra config needed)
+EOF
+    log "UART overlays added to $BOOT_CONFIG"
+else
+    log "UART overlays already present in $BOOT_CONFIG — skipping"
+fi
+
+# Disable Bluetooth service (UART0 is now used for MIDI)
+systemctl disable bluetooth 2>/dev/null && log "Bluetooth disabled (UART0 reserved for MIDI)" || true
+
+# Kiosk: create ~/.xinitrc to launch Chromium fullscreen on the touchscreen
+XINITRC="/home/$SERVICE_USER/.xinitrc"
+cat > "$XINITRC" << 'EOF'
+#!/bin/sh
+# MIDI Box kiosk — fullscreen Chromium on the 7" touchscreen
+xset -dpms          # disable display power management
+xset s noblank      # disable screen blanking
+xset s off          # disable screensaver
+unclutter -idle 1 -root &   # hide mouse cursor after 1s idle
+
+# Wait for the MIDI Box web server to be ready
+until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 1; done
+
+exec chromium-browser \
+    --kiosk \
+    --noerrdialogs \
+    --disable-infobars \
+    --no-first-run \
+    --disable-restore-session-state \
+    --disable-session-crashed-bubble \
+    --touch-events=enabled \
+    http://localhost:8080/display
+EOF
+chmod +x "$XINITRC"
+chown "$SERVICE_USER:$SERVICE_USER" "$XINITRC"
+log "Kiosk .xinitrc written for user $SERVICE_USER"
+
+# Systemd service to start the kiosk X session after midi-box is running
+KIOSK_SERVICE="/etc/systemd/system/midi-box-kiosk.service"
+cat > "$KIOSK_SERVICE" << EOF
+[Unit]
+Description=MIDI Box Kiosk (Chromium on touchscreen)
+After=midi-box.service graphical.target
+Wants=midi-box.service
+
+[Service]
+Type=simple
+User=$SERVICE_USER
+PAMName=login
+Environment=XDG_RUNTIME_DIR=/run/user/$(id -u "$SERVICE_USER" 2>/dev/null || echo 1000)
+ExecStart=/usr/bin/startx /home/$SERVICE_USER/.xinitrc -- :0 vt7
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
+EOF
+systemctl daemon-reload
+systemctl enable midi-box-kiosk.service
+log "Kiosk service installed: midi-box-kiosk.service"
 
 # ---------------------------------------------------------------------------
 # Done!
@@ -204,7 +284,7 @@ AP_IP=$(grep 'AP_IP=' "$CONFIG_DIR/setup_wifi_ap.sh" | head -1 | cut -d'"' -f2)
 
 echo
 echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║         Setup complete!                      ║${NC}"
+echo -e "${GREEN}║         Setup complete!                       ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
 echo
 echo -e "  WiFi network : ${CYAN}${AP_SSID:-MIDI-BOX}${NC}"

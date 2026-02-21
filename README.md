@@ -104,7 +104,7 @@ python3 src/main.py --mode standalone -v
 
 ## Tech Stack
 
-- **Software:** Python 3, mido, rtmidi, Flask, WebSocket
-- **Hardware (Pi):** Raspberry Pi 4, SC16IS752 UART expander, 6N138 optocouplers
-- **Platforms:** macOS (dev/testing), Raspberry Pi OS (production)
+- **Software:** Python 3, mido, rtmidi, Flask, pyserial, psutil
+- **Hardware (Pi):** Raspberry Pi 4, Pi native UARTs (MIDI OUT), 5" DSI touchscreen (kiosk)
+- **Platforms:** macOS (dev/testing with `--mock`), Raspberry Pi OS (production)
 - **DAW:** Logic Pro on macOS
