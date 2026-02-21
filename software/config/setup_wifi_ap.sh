@@ -43,10 +43,12 @@ echo "======================================================"
 echo "[0/6] Unblocking WiFi (rfkill)..."
 rfkill unblock all 2>/dev/null || true
 
-# --- Install packages ---
-echo "[1/6] Installing hostapd and dnsmasq..."
-apt-get update -qq
-apt-get install -y hostapd dnsmasq
+# --- Ensure packages are available (already installed by pi_setup.sh) ---
+echo "[1/6] Checking hostapd and dnsmasq..."
+if ! command -v hostapd &>/dev/null || ! command -v dnsmasq &>/dev/null; then
+    apt-get update -qq
+    apt-get install -y hostapd dnsmasq
+fi
 
 systemctl stop hostapd dnsmasq 2>/dev/null || true
 
