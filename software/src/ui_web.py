@@ -678,6 +678,49 @@ def create_app(bridge):
 
         return jsonify(stats)
 
+    @app.route("/api/panic", methods=["POST"])
+    def api_panic():
+        """Send All Notes Off + All Sound Off to every output device."""
+        return jsonify(_cmd("midi.panic"))
+
+    # ---------------------------------------------------------------
+    # API: MIDI Looper
+    # ---------------------------------------------------------------
+
+    @app.route("/api/rtpmidi")
+    def api_rtpmidi_status():
+        return jsonify(dict(_state().get("rtp_midi", {"enabled": False, "sessions": []})))
+
+    @app.route("/api/looper")
+    def api_looper_status():
+        return jsonify(dict(_state().get("looper", {"slots": []})))
+
+    @app.route("/api/looper/<int:slot_id>/configure", methods=["POST"])
+    def api_looper_configure(slot_id):
+        data = request.json or {}
+        return jsonify(_cmd("looper.configure", {
+            "slot_id":     slot_id,
+            "source":      data.get("source", ""),
+            "destination": data.get("destination", ""),
+            "midi_channel": data.get("midi_channel"),
+        }))
+
+    @app.route("/api/looper/<int:slot_id>/record", methods=["POST"])
+    def api_looper_record(slot_id):
+        return jsonify(_cmd("looper.record", {"slot_id": slot_id}))
+
+    @app.route("/api/looper/<int:slot_id>/play", methods=["POST"])
+    def api_looper_play(slot_id):
+        return jsonify(_cmd("looper.play", {"slot_id": slot_id}))
+
+    @app.route("/api/looper/<int:slot_id>/stop", methods=["POST"])
+    def api_looper_stop(slot_id):
+        return jsonify(_cmd("looper.stop", {"slot_id": slot_id}))
+
+    @app.route("/api/looper/<int:slot_id>/clear", methods=["POST"])
+    def api_looper_clear(slot_id):
+        return jsonify(_cmd("looper.clear", {"slot_id": slot_id}))
+
     @app.route("/api/system/restart", methods=["POST"])
     def api_system_restart():
         """Restart the MIDI Box service — sends SIGTERM to MIDI engine process."""

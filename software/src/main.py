@@ -15,6 +15,7 @@ import os
 import sys
 import platform
 import signal
+from typing import Optional
 import time
 import logging
 import argparse
@@ -27,6 +28,8 @@ from router import MidiRouter
 from preset_manager import PresetManager
 from midi_logger import MidiLogger
 from midi_player import MidiPlayer
+from midi_looper import MidiLooper
+from rtpmidi import RtpMidiServer
 from clip_launcher import ClipLauncher
 from state import StateManager
 from ui_web import LogBuffer, run_flask_process
@@ -80,10 +83,12 @@ class MidiBox:
         self.state = StateManager()
         self.midi_logger = MidiLogger(max_entries=500)
         self.player = MidiPlayer()
+        self.looper = MidiLooper()
         self.launcher = ClipLauncher()
         self.log_buffer = LogBuffer()
         self.mode = "standalone"
         self.wifi_config = self._load_wifi_config()
+        self.rtp_midi: Optional[RtpMidiServer] = None
         self._running = False
         self._web_process = None
         self.bridge = None
@@ -110,7 +115,8 @@ class MidiBox:
 
         # Register callbacks
         self.router.set_send_callback(self._send_midi)
-        self.player._send_callback = self._send_midi
+        self.player._send_callback  = self._send_midi
+        self.looper._send_callback  = self._send_midi
         self.launcher._send_callback = self._send_midi
         self.launcher._output_devices_callback = self._get_output_device_names
         self.router._clock_callback = self.launcher.on_clock_message
@@ -155,6 +161,9 @@ class MidiBox:
         self.bridge = IpcBridge()
         self._start_web_ui()
 
+        # Start RTP-MIDI server (Apple MIDI over WiFi)
+        self._init_rtpmidi()
+
         # Main loop
         self._running = True
         logger.info("Routing engine running. Press Ctrl+C to stop.")
@@ -165,7 +174,10 @@ class MidiBox:
     def stop(self):
         logger.info("Shutting down...")
         self.player.stop()
+        self.looper.close()
         self.launcher.stop()
+        if self.rtp_midi:
+            self.rtp_midi.stop()
         self._save_state()
         self._running = False
         self.alsa.close_all()
@@ -259,6 +271,21 @@ class MidiBox:
                     logger.info(f"  HW:  {device.name} ({port.device_path})")
         except ImportError:
             logger.info("  Hardware MIDI not available (not on Pi)")
+
+    def _init_rtpmidi(self):
+        """Start the RTP-MIDI (Apple MIDI) server and register it as a virtual device."""
+        try:
+            self.rtp_midi = RtpMidiServer(name="MIDI Box", port=5004)
+            if self.rtp_midi.start():
+                self.rtp_midi.set_on_message(self._on_rtpmidi_received)
+                # Register as both input and output so it appears in routing
+                self.registry.register_usb_device("RTP-MIDI (WiFi)", "RTP-MIDI (WiFi)")
+                logger.info("RTP-MIDI (Apple MIDI over WiFi) ready")
+            else:
+                self.rtp_midi = None
+        except Exception as exc:
+            logger.warning(f"RTP-MIDI server failed to start: {exc}")
+            self.rtp_midi = None
 
     def _init_gadget(self):
         """Set up USB gadget MIDI bridge (Pi only)."""
@@ -677,6 +704,32 @@ class MidiBox:
             self.presets.current_preset = None
             return {"ok": True}
 
+        # --- Looper ---
+        elif action == "looper.configure":
+            return self.looper.configure(
+                params["slot_id"],
+                params.get("source", ""),
+                params.get("destination", ""),
+                params.get("midi_channel"),
+            )
+
+        elif action == "looper.record":
+            return self.looper.record(params["slot_id"])
+
+        elif action == "looper.play":
+            return self.looper.play(params["slot_id"])
+
+        elif action == "looper.stop":
+            return self.looper.stop(params["slot_id"])
+
+        elif action == "looper.clear":
+            return self.looper.clear(params["slot_id"])
+
+        # --- MIDI Panic ---
+        elif action == "midi.panic":
+            self._send_panic()
+            return {"ok": True}
+
         # --- Logs ---
         elif action == "logs.clear":
             self.log_buffer.clear()
@@ -760,6 +813,16 @@ class MidiBox:
             "files": self.player.list_files(),
         }
 
+        # Looper
+        self.bridge.state["looper"] = self.looper.get_status()
+
+        # RTP-MIDI
+        self.bridge.state["rtp_midi"] = {
+            "enabled":  self.rtp_midi is not None,
+            "port":     self.rtp_midi.port if self.rtp_midi else 5004,
+            "sessions": self.rtp_midi.active_sessions if self.rtp_midi else [],
+        }
+
         # Preset list
         self.bridge.state["presets"] = self.presets.list_presets()
 
@@ -776,6 +839,7 @@ class MidiBox:
         device = self.registry.find_by_port_id(port_name)
         source_name = device.name if device else port_name
         self.midi_logger.log_input(source_name, message)
+        self.looper.on_midi_message(source_name, message)
         self.router.process_message(source_name, message)
 
     def _set_realtime_priority(self):
@@ -810,6 +874,13 @@ class MidiBox:
     def _send_midi(self, destination: str, message) -> bool:
         device = self.registry.get_device(destination)
 
+        # Send to WiFi peers via RTP-MIDI
+        if destination == "RTP-MIDI (WiFi)" and self.rtp_midi:
+            ok = self.rtp_midi.send(message)
+            if ok:
+                self.midi_logger.log_output(destination, message)
+            return ok
+
         # Send to Mac via gadget
         if destination in ("Logic Pro", "Mac"):
             if self.gadget:
@@ -832,9 +903,28 @@ class MidiBox:
             self.midi_logger.log_output(destination, message)
         return ok
 
+    def _send_panic(self):
+        """Send All Sound Off (CC 120) + All Notes Off (CC 123) on all 16 channels
+        to every connected output device."""
+        import mido
+        outputs = [d.name for d in self.registry.get_output_devices()]
+        for dest in outputs:
+            for ch in range(16):
+                self._send_midi(dest, mido.Message("control_change", channel=ch, control=120, value=0))
+                self._send_midi(dest, mido.Message("control_change", channel=ch, control=123, value=0))
+        logger.info(f"MIDI Panic: All Sound Off + All Notes Off sent to {len(outputs)} output(s)")
+
     def _on_hw_midi_received(self, port_name: str, message):
         self.midi_logger.log_input(port_name, message)
+        self.looper.on_midi_message(port_name, message)
         self.router.process_message(port_name, message)
+
+    def _on_rtpmidi_received(self, message):
+        """Called from the RTP-MIDI server thread when a WiFi MIDI message arrives."""
+        source_name = "RTP-MIDI (WiFi)"
+        self.midi_logger.log_input(source_name, message)
+        self.looper.on_midi_message(source_name, message)
+        self.router.process_message(source_name, message)
 
     def _on_usb_device_connected(self, port_name: str, port):
         device = self.registry.register_usb_device(port.port_name, port_name)

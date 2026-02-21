@@ -34,6 +34,9 @@
       <li><a href="#settings" data-page="settings">
         <span class="nav-icon">&#9881;</span><span>Settings</span>
       </a></li>
+      <li><a href="#looper" data-page="looper">
+        <span class="nav-icon">&#9711;</span><span>Looper</span>
+      </a></li>
       <li><a href="#player" data-page="player">
         <span class="nav-icon">&#9654;</span><span>Player</span>
       </a></li>
@@ -45,7 +48,7 @@
       </a></li>
     </ul>
     <div class="sidebar-footer">
-      <button class="panic-btn" id="panic-btn" onclick="panicRestart()">&#9724; PANIC</button>
+      <button class="panic-btn" id="panic-btn" onclick="midiPanic()">&#9724; PANIC</button>
       <div class="panic-status" id="panic-status"></div>
       <div style="margin-top:8px;"><span id="device-count">0</span> devices connected</div>
     </div>
@@ -333,6 +336,19 @@
         </div>
       </div>
 
+      <div class="card" style="margin-top:8px;">
+        <div class="card-header">
+          <h3>Network MIDI (RTP-MIDI)</h3>
+          <span id="rtpmidi-badge" class="sys-service-badge">—</span>
+        </div>
+        <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.6;">
+          Appears as <strong>MIDI Box</strong> in macOS <em>Audio MIDI Setup → Window → MIDI Studio → Network</em>.
+          On iOS open a Core MIDI app and select the network session.<br>
+          Bonjour auto-discovery requires <code>pip install zeroconf</code>; without it add the Pi's IP manually.
+        </p>
+        <div id="rtpmidi-sessions" style="font-size:12px; color:var(--text-muted);">Loading…</div>
+      </div>
+
       <div class="grid-2" style="margin-top:8px;">
         <div class="card">
           <div class="card-header"><h3>Export / Import</h3></div>
@@ -406,6 +422,15 @@
         </div>
         <ul class="preset-list" id="midi-file-list"></ul>
       </div>
+    </div>
+
+    <!-- ============== LOOPER ============== -->
+    <div class="page" id="page-looper">
+      <div class="page-header">
+        <h2>MIDI Looper</h2>
+        <p>Record and loop MIDI in real-time — tap REC to record, tap again to loop</p>
+      </div>
+      <div id="looper-slots"></div>
     </div>
 
     <!-- ============== LOGS ============== -->

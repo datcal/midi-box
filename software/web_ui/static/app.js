@@ -42,6 +42,7 @@ function loadPageData(page) {
     case 'launcher': loadLauncher(); break;
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
+    case 'looper': loadLooper(); break;
     case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
@@ -577,10 +578,11 @@ async function clearMonitor() {
 // --- Settings ---
 
 async function loadSettings() {
-  const [data, devData, netData] = await Promise.all([
+  const [data, devData, netData, rtpData] = await Promise.all([
     api('/settings'),
     api('/devices'),
     api('/network'),
+    api('/rtpmidi'),
   ]);
 
   document.getElementById('setting-platform').value = data.platform;
@@ -606,6 +608,28 @@ async function loadSettings() {
   document.getElementById('wifi-ssid-input').value = netData.ssid;
   document.getElementById('wifi-pass-input').value = '';
   document.getElementById('wifi-save-msg').textContent = '';
+
+  // RTP-MIDI status
+  const badge = document.getElementById('rtpmidi-badge');
+  const sessEl = document.getElementById('rtpmidi-sessions');
+  if (badge) {
+    badge.textContent = rtpData.enabled ? 'RUNNING' : 'DISABLED';
+    badge.style.background = rtpData.enabled ? 'var(--success, #4caf50)' : 'var(--text-muted)';
+  }
+  if (sessEl) {
+    if (!rtpData.enabled) {
+      sessEl.textContent = 'Server not running (ports 5004/5005).';
+    } else if (!rtpData.sessions || rtpData.sessions.length === 0) {
+      sessEl.innerHTML = `Listening on ports ${rtpData.port}/${(rtpData.port||5004)+1} — no clients connected.<br>
+        <span style="color:var(--text-muted);">Open Audio MIDI Setup on Mac → Network → connect to "MIDI Box".</span>`;
+    } else {
+      sessEl.innerHTML = rtpData.sessions.map(s =>
+        `<div style="padding:2px 0;">&#9679; ${esc(s.name)} (${esc(s.address)})
+         ${s.connected ? ' <span style="color:var(--success,#4caf50);">connected</span>'
+                       : ' <span style="color:var(--text-muted);">handshaking</span>'}</div>`
+      ).join('');
+    }
+  }
 }
 
 async function saveWifi(e) {
@@ -1255,7 +1279,164 @@ function fmtUptime(seconds) {
   return parts.join(' ');
 }
 
-// --- Panic / restart ---
+// --- MIDI Looper ---
+
+let looperInterval = null;
+
+async function loadLooper() {
+  const [looperData, devData] = await Promise.all([
+    api('/looper'),
+    api('/devices'),
+  ]);
+  renderLooperSlots(looperData.slots, devData.devices);
+
+  if (looperInterval) clearInterval(looperInterval);
+  looperInterval = setInterval(pollLooper, 500);
+}
+
+async function pollLooper() {
+  if (currentPage !== 'looper') {
+    clearInterval(looperInterval);
+    looperInterval = null;
+    return;
+  }
+  const data = await api('/looper');
+  updateLooperStates(data.slots);
+}
+
+function updateLooperStates(slots) {
+  if (!slots) return;
+  slots.forEach(s => {
+    const stateEl = document.getElementById(`loop-state-${s.slot_id}`);
+    const lenEl   = document.getElementById(`loop-len-${s.slot_id}`);
+    if (stateEl) stateEl.textContent = s.state.toUpperCase();
+    if (stateEl) stateEl.className   = `loop-state loop-state-${s.state}`;
+    if (lenEl)   lenEl.textContent   = s.length > 0 ? s.length.toFixed(2) + 's' : '';
+    // Update button labels based on state
+    const recBtn = document.getElementById(`loop-rec-${s.slot_id}`);
+    if (recBtn) {
+      if (s.state === 'recording')    recBtn.textContent = '⬛ STOP REC';
+      else if (s.state === 'overdubbing') recBtn.textContent = '⬛ STOP OD';
+      else                            recBtn.textContent = '⏺ REC';
+      recBtn.classList.toggle('btn-recording', s.state === 'recording' || s.state === 'overdubbing');
+    }
+    const stopBtn = document.getElementById(`loop-stop-${s.slot_id}`);
+    if (stopBtn) stopBtn.disabled = s.state === 'empty';
+  });
+}
+
+function renderLooperSlots(slots, devices) {
+  const container = document.getElementById('looper-slots');
+  if (!slots) return;
+
+  const inputs  = devices.filter(d => d.direction === 'both' || d.direction === 'in');
+  const outputs = devices.filter(d => d.direction === 'both' || d.direction === 'out');
+
+  const srcOpts = inputs.map(d  => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
+  const dstOpts = outputs.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
+  const chOpts  = '<option value="0">All channels</option>' +
+    Array.from({length: 16}, (_, i) => `<option value="${i+1}">Channel ${i+1}</option>`).join('');
+
+  container.innerHTML = slots.map(s => `
+    <div class="card loop-card" style="margin-bottom:8px;">
+      <div class="loop-header">
+        <span class="loop-title">LOOP ${s.slot_id + 1}</span>
+        <span id="loop-state-${s.slot_id}" class="loop-state loop-state-${s.state}">${s.state.toUpperCase()}</span>
+        <span id="loop-len-${s.slot_id}" class="loop-len">${s.length > 0 ? s.length.toFixed(2) + 's' : ''}</span>
+        <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${s.event_count} events</span>
+      </div>
+      <div class="loop-config">
+        <div class="loop-config-row">
+          <span class="loop-label">Source</span>
+          <select id="loop-src-${s.slot_id}" class="loop-select"
+                  onchange="looperConfigure(${s.slot_id})">
+            <option value="">— select —</option>
+            ${srcOpts}
+          </select>
+        </div>
+        <div class="loop-config-row">
+          <span class="loop-label">→ Dest</span>
+          <select id="loop-dst-${s.slot_id}" class="loop-select"
+                  onchange="looperConfigure(${s.slot_id})">
+            <option value="">— select —</option>
+            ${dstOpts}
+          </select>
+        </div>
+        <div class="loop-config-row">
+          <span class="loop-label">Ch</span>
+          <select id="loop-ch-${s.slot_id}" class="loop-select loop-select-ch"
+                  onchange="looperConfigure(${s.slot_id})">
+            ${chOpts}
+          </select>
+        </div>
+      </div>
+      <div class="loop-controls">
+        <button id="loop-rec-${s.slot_id}"
+                class="btn btn-accent loop-rec-btn"
+                onclick="looperRecord(${s.slot_id})">⏺ REC</button>
+        <button id="loop-stop-${s.slot_id}"
+                class="btn loop-stop-btn"
+                onclick="looperStop(${s.slot_id})"
+                ${s.state === 'empty' ? 'disabled' : ''}>⏹ STOP</button>
+        <button class="btn btn-danger loop-clear-btn"
+                onclick="looperClear(${s.slot_id})">✕ CLEAR</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Restore current selections
+  slots.forEach(s => {
+    const srcEl = document.getElementById(`loop-src-${s.slot_id}`);
+    const dstEl = document.getElementById(`loop-dst-${s.slot_id}`);
+    const chEl  = document.getElementById(`loop-ch-${s.slot_id}`);
+    if (srcEl && s.source)      srcEl.value = s.source;
+    if (dstEl && s.destination) dstEl.value = s.destination;
+    if (chEl  && s.midi_channel) chEl.value = s.midi_channel;
+  });
+
+  updateLooperStates(slots);
+}
+
+async function looperConfigure(slotId) {
+  const src = document.getElementById(`loop-src-${slotId}`)?.value || '';
+  const dst = document.getElementById(`loop-dst-${slotId}`)?.value || '';
+  const ch  = parseInt(document.getElementById(`loop-ch-${slotId}`)?.value) || 0;
+  await api(`/looper/${slotId}/configure`, {
+    method: 'POST',
+    body: { source: src, destination: dst, midi_channel: ch || null },
+  });
+}
+
+async function looperRecord(slotId) {
+  await api(`/looper/${slotId}/record`, { method: 'POST' });
+}
+
+async function looperStop(slotId) {
+  await api(`/looper/${slotId}/stop`, { method: 'POST' });
+}
+
+async function looperClear(slotId) {
+  await api(`/looper/${slotId}/clear`, { method: 'POST' });
+}
+
+// --- MIDI Panic (silence all notes) ---
+
+async function midiPanic() {
+  const btn    = document.getElementById('panic-btn');
+  const status = document.getElementById('panic-status');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Silencing…'; }
+  try {
+    await api('/panic', { method: 'POST' });
+  } catch (_) {}
+  if (status) { status.textContent = 'All Notes Off'; status.style.color = 'var(--accent)'; }
+  setTimeout(() => {
+    if (btn)    { btn.textContent = '\u25A0 PANIC'; btn.disabled = false; }
+    if (status) { status.textContent = ''; }
+  }, 2000);
+}
+
+// --- Service restart ---
 
 async function panicRestart() {
   const btn    = document.getElementById('panic-btn');
