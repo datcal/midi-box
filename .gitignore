@@ -6,8 +6,12 @@ venv/
 .venv/
 *.egg-info/
 
-# State (local to each machine)
+# State (local to each machine — not committed)
 software/data/
+
+# Logs
+*.log
+/tmp/midi-box-update.log
 
 # OS
 .DS_Store
@@ -16,5 +20,4 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-__pycache__/
 .claude/

@@ -26,5 +26,5 @@ web_ui:
 wifi_ap:
   channel: 6
   ip: 192.168.4.1
-  password: '1231232132132'
+  password: 'midibox123'   # change this after first boot via Settings → WiFi
   ssid: MIDI-BOX
