@@ -908,6 +908,9 @@ class MidiBox:
         """Called from rtmidi's thread immediately when a USB MIDI message arrives."""
         device = self.registry.find_by_port_id(port_name)
         source_name = device.name if device else port_name
+        # Ignore messages from output-only devices (e.g. synths sending unsolicited clock)
+        if device and device.direction == "out":
+            return
         if not self._performance_mode:
             self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
@@ -987,6 +990,9 @@ class MidiBox:
         logger.info(f"MIDI Panic: All Sound Off + All Notes Off sent to {len(outputs)} output(s)")
 
     def _on_hw_midi_received(self, port_name: str, message):
+        device = self.registry.get_device(port_name)
+        if device and device.direction == "out":
+            return
         if not self._performance_mode:
             self.midi_logger.log_input(port_name, message)
         self.looper.on_midi_message(port_name, message)
