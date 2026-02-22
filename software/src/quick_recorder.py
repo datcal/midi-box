@@ -417,6 +417,13 @@ class QuickRecorder:
         if self._clock_source == "launcher" and self._launcher:
             bpm = self._launcher.bpm
 
+        # Detected external BPM (from launcher's 0xF8 measurement when clock_source == external)
+        ext_bpm = None
+        if self._clock_source == "external" and self._launcher:
+            ext_bpm = self._launcher._ext_bpm
+            if ext_bpm is not None:
+                ext_bpm = round(ext_bpm, 1)
+
         return {
             "state": self._state,
             "length": round(self._length, 2),
@@ -425,6 +432,7 @@ class QuickRecorder:
             "recent_events": recent,
             "clock_source": self._clock_source,
             "bpm": bpm,
+            "ext_bpm": ext_bpm,
             "quantize": self._quantize,
             "beats_per_bar": self._beats_per_bar,
             "beat": self._beat,

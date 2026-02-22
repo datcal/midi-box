@@ -25,6 +25,7 @@ document.querySelectorAll('[data-page]').forEach(link => {
 
 function navigateTo(page) {
   currentPage = page;
+  history.replaceState(null, '', '#' + page);
   // Update nav active state
   document.querySelectorAll('[data-page]').forEach(a => a.classList.remove('active'));
   document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
@@ -43,7 +44,6 @@ function loadPageData(page) {
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
     case 'recorder': loadRecorder(); break;
-    case 'looper': loadLooper(); break;
     case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
@@ -53,13 +53,22 @@ function loadPageData(page) {
 
 // --- API helpers ---
 
-async function api(path, opts = {}) {
-  const resp = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  return resp.json();
+async function api(path, opts = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`/api${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    return resp.json();
+  } catch (e) {
+    return {};
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // --- Dashboard ---
@@ -818,6 +827,30 @@ function updateClockControls(clock) {
 
   document.getElementById('clock-int').classList.toggle('active', clock.mode === 'internal');
   document.getElementById('clock-ext').classList.toggle('active', clock.mode === 'external');
+
+  _setLauncherBpmDisabled(clock.mode === 'external');
+
+  // Show detected external BPM label
+  const extLabel = document.getElementById('launcher-ext-bpm');
+  if (extLabel) {
+    if (clock.mode === 'external') {
+      extLabel.textContent = clock.ext_bpm ? `${clock.ext_bpm} BPM` : '-- BPM';
+      extLabel.style.display = '';
+    } else {
+      extLabel.style.display = 'none';
+    }
+  }
+}
+
+function _setLauncherBpmDisabled(disabled) {
+  const bpmInput = document.getElementById('launcher-bpm');
+  const bpmMinus = document.getElementById('launcher-bpm-minus');
+  const bpmPlus  = document.getElementById('launcher-bpm-plus');
+  if (bpmInput) bpmInput.disabled = disabled;
+  if (bpmMinus) bpmMinus.disabled = disabled;
+  if (bpmPlus)  bpmPlus.disabled  = disabled;
+  const bpmDiv = bpmInput?.closest('.clock-bpm');
+  if (bpmDiv) bpmDiv.style.opacity = disabled ? '0.45' : '';
 }
 
 function updateBeatDisplay(poll) {
@@ -893,6 +926,12 @@ async function setClockMode(mode) {
   await api('/launcher/clock', { method: 'POST', body: { mode } });
   document.getElementById('clock-int').classList.toggle('active', mode === 'internal');
   document.getElementById('clock-ext').classList.toggle('active', mode === 'external');
+  _setLauncherBpmDisabled(mode === 'external');
+  const extLabel = document.getElementById('launcher-ext-bpm');
+  if (extLabel) {
+    extLabel.style.display = mode === 'external' ? '' : 'none';
+    if (mode === 'external') extLabel.textContent = '-- BPM';
+  }
 }
 
 async function adjustBpm(delta) {
@@ -938,7 +977,11 @@ async function removeClip(layerId, slot) {
 }
 
 async function stopLayerBtn(layerId) {
-  await api(`/launcher/layers/${layerId}/stop`, { method: 'POST' });
+  // Fire both simultaneously — panic gives instant note-off, stop halts the layer
+  await Promise.all([
+    api(`/launcher/layers/${layerId}/stop`, { method: 'POST' }),
+    api('/panic', { method: 'POST' }),
+  ]);
 }
 
 async function removeLayer(layerId) {
@@ -1441,12 +1484,47 @@ function _applyRecClockState(data) {
     if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
   });
 
-  // BPM — disabled when synced to launcher
+  // BPM — disabled when synced to launcher OR external
+  const bpmDisabled = data.clock_source === 'launcher' || data.clock_source === 'external';
   const bpmInput = document.getElementById('rec-bpm');
+  const bpmMinus = document.getElementById('rec-bpm-minus');
+  const bpmPlus  = document.getElementById('rec-bpm-plus');
   if (bpmInput) {
     bpmInput.value = Math.round(data.bpm || 120);
-    bpmInput.disabled = data.clock_source === 'launcher';
+    bpmInput.disabled = bpmDisabled;
   }
+  if (bpmMinus) bpmMinus.disabled = bpmDisabled;
+  if (bpmPlus)  bpmPlus.disabled  = bpmDisabled;
+  const bpmDiv = bpmInput?.closest('.clock-bpm');
+  if (bpmDiv) bpmDiv.style.opacity = bpmDisabled ? '0.45' : '';
+
+  // Clock source context panel
+  const _cspConfig = {
+    standalone: {
+      cls: 'standalone',
+      icon: '⊙',
+      text: 'Own clock — set tempo with BPM above',
+    },
+    launcher: {
+      cls: 'launcher',
+      icon: '⟲',
+      text: 'Synced to Launcher — BPM follows the Clip Launcher. Start the Launcher transport first.',
+    },
+    external: {
+      cls: 'external',
+      icon: '⟵',
+      text: data.ext_bpm
+        ? `External MIDI clock — ${data.ext_bpm} BPM from hardware`
+        : 'External MIDI clock — waiting for clock signal from hardware.',
+    },
+  };
+  const csp = _cspConfig[data.clock_source] || _cspConfig.standalone;
+  const panel  = document.getElementById('rec-clock-panel');
+  const cspTxt = document.getElementById('rec-csp-text');
+  const cspIco = document.getElementById('rec-csp-icon');
+  if (panel)  panel.className = 'clock-source-panel ' + csp.cls;
+  if (cspTxt) cspTxt.textContent = csp.text;
+  if (cspIco) cspIco.textContent = csp.icon;
 
   // Quantize selector
   const qSel = document.getElementById('rec-quantize');
@@ -1575,176 +1653,107 @@ async function recDelete(name) {
   loadRecordings();
 }
 
-// --- MIDI Looper ---
+// --- Info Popover ---
 
-let loopInterval = null;
+const INFO_DATA = {
+  'launcher-clock-mode': {
+    title: 'Clock Mode — INT / EXT',
+    musician: 'INT: The Launcher uses its own internal clock. You set the BPM and everything runs at that tempo.\n\nEXT: The Launcher follows MIDI clock signals coming from external hardware (drum machine, sequencer, DAW). BPM is locked to that device — you cannot change it here.',
+    dev: 'INT = internal ticker at interval 60.0 / (bpm × 96) s, emits 0xF8 every 4 ticks (24 PPQ).\nEXT = subscribes to incoming 0xF8 MIDI clock messages from connected devices via router inputs.',
+  },
+  'launcher-bpm': {
+    title: 'BPM — Beats Per Minute',
+    musician: 'Sets the playback speed of the internal clock. All clips launch and loop in sync with this tempo.\n\nRange: 20–300 BPM. Grayed out when EXT clock mode is active (tempo is controlled by external hardware).',
+    dev: 'Sets bpm on ClipLauncher. Tick interval = 60.0 / (bpm × 96) s at 96 PPQ internal resolution. MIDI clock (0xF8) emitted every 4 internal ticks = 24 PPQ standard.',
+  },
+  'launcher-quantum': {
+    title: 'Launch Quantum',
+    musician: 'Decides when a clip starts or stops playing. "Bar" means clips always launch at the beginning of the next bar, keeping everything in time. "Beat" is more immediate — clips launch on the next beat.',
+    dev: 'Quantization boundary in internal ticks:\nBeat = 96 ticks\nBar = 96 × beats_per_bar\n2bar = 96 × bpb × 2\n4bar = 96 × bpb × 4\nClip launch queued, fires at next boundary.',
+  },
+  'rec-clock-mode': {
+    title: 'Recording Clock Source',
+    musician: 'INTERNAL: The recorder uses its own independent clock. You control the BPM.\n\nSYNC: The recorder follows the Clip Launcher\'s clock and transport — same tempo, same beat position. Great for recording loops that will play back in the Launcher.\n\nEXT: The recorder syncs to incoming MIDI clock from your hardware (e.g. drum machine). BPM is set by the external device.',
+    dev: 'standalone = own ticker thread at set BPM.\nlauncher = register_tick_subscriber on ClipLauncher, receives (tick, beat, bar, running).\nexternal = derived from incoming 0xF8 MIDI clock messages at 24 PPQ.',
+  },
+  'rec-quantize': {
+    title: 'Quantize / Loop Length Snap',
+    musician: 'Controls how the recording length is rounded when you stop.\n\n"Free" — records exactly as long as you play. No snapping.\n\n"Bar" — the loop length rounds up to the next complete bar. Even if you stop mid-bar, the loop plays the full bar. This ensures seamless rhythmic looping.\n\nCount-in: When Quantize is not Free, beat dots pulse before recording starts — waiting for the next quantum boundary.',
+    dev: 'On stop: quantized_len = ((elapsed_ticks // qt) + 1) × qt.\nCount-in waits for next quantum boundary (timeout 30s).\n96 PPQ internal resolution.\nQt values: free=0, 1/16=24, 1/8=48, 1/4=96, bar=96×bpb, 2bar×2, 4bar×4.',
+  },
+  'rec-auto-play': {
+    title: 'Auto-Play After Recording',
+    musician: 'When ON, your recording automatically starts playing back the moment you stop recording — no need to press Play manually. Useful for quick looping workflows.',
+    dev: 'Sets QuickRecorder.auto_play flag. On state transition recording → stopped, if auto_play is True, _play() is called immediately.',
+  },
+  'rec-record-btn': {
+    title: 'RECORD Button',
+    musician: 'Press to start capturing all live MIDI from hardware inputs.\n\nPress again (or the foot pedal) to stop recording.\n\nIf Quantize is not "Free", you\'ll see a count-in: the beat dots pulse while the recorder waits for the right beat to start. Recording begins automatically on the next quantum boundary.',
+    dev: 'Calls /api/recorder/toggle → quick_recorder.toggle().\nState machine: idle → count_in (if quantize≠free) → recording → stopped.\nCaptures ALL hardware MIDI inputs. MIDI player and looper excluded.\nFoot pedal triggers the same toggle().',
+  },
+};
 
-async function loadLooper() {
-  const data = await api('/looper');
-  _applyLooperState(data);
-  if (loopInterval) clearInterval(loopInterval);
-  loopInterval = setInterval(pollLooper, 400);
-}
-
-async function pollLooper() {
-  if (currentPage !== 'looper') {
-    clearInterval(loopInterval);
-    loopInterval = null;
-    return;
-  }
-  const data = await api('/looper');
-  _applyLooperState(data);
-}
-
-function _applyLooperState(data) {
+function showInfoPopover(btn, key) {
+  const data = INFO_DATA[key];
   if (!data) return;
 
-  // Clock bar
-  _applyLoopClockState(data);
+  const popover = document.getElementById('info-popover');
+  const content = document.getElementById('info-popover-content');
+  if (!popover || !content) return;
 
-  // Slots
-  const container = document.getElementById('looper-slots');
-  if (!container) return;
+  content.innerHTML = `
+    <div class="info-popover-title">${esc(data.title)}</div>
+    <div class="info-popover-musician">${esc(data.musician).replace(/\n/g, '<br>')}</div>
+    ${data.dev ? `
+    <div class="info-popover-dev-section">
+      <div class="info-popover-dev-label">&#128187; Developer</div>
+      <div class="info-popover-dev">${esc(data.dev).replace(/\n/g, '<br>')}</div>
+    </div>` : ''}
+  `;
 
-  const slots = data.slots || [];
-  if (!container.children.length || container.children.length !== slots.length) {
-    _renderLooperSlots(container, slots);
-  } else {
-    _updateLooperSlots(slots);
+  // Position near button, keep within viewport
+  const rect = btn.getBoundingClientRect();
+  const popW = 340;
+  let left = rect.right + 10;
+  let top  = rect.top;
+
+  if (left + popW > window.innerWidth - 8) {
+    left = rect.left - popW - 10;
+  }
+  if (left < 8) left = 8;
+  if (top + 300 > window.innerHeight - 8) {
+    top = window.innerHeight - 310;
+  }
+  if (top < 8) top = 8;
+
+  popover.style.left = left + 'px';
+  popover.style.top  = top  + 'px';
+  // Remove any stale listener BEFORE the current click event bubbles to document.
+  // This prevents the old listener from closing the popover we just opened.
+  document.removeEventListener('click', _closeInfoOnOutside);
+
+  popover.classList.add('active');
+
+  // Register a persistent close-on-outside listener after this event finishes.
+  setTimeout(() => {
+    document.addEventListener('click', _closeInfoOnOutside);
+  }, 10);
+}
+
+function _closeInfoOnOutside(e) {
+  const popover = document.getElementById('info-popover');
+  if (!popover) return;
+  // Only close (and remove listener) when the click is outside the popover.
+  // Clicks inside the popover (reading, scrolling) are ignored so the listener stays.
+  if (!popover.contains(e.target)) {
+    popover.classList.remove('active');
+    document.removeEventListener('click', _closeInfoOnOutside);
   }
 }
 
-function _applyLoopClockState(data) {
-  const sources = ['standalone', 'launcher', 'external'];
-  const ids = ['loop-clock-standalone', 'loop-clock-launcher', 'loop-clock-ext'];
-  sources.forEach((s, i) => {
-    const btn = document.getElementById(ids[i]);
-    if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
-  });
-
-  const bpmInput = document.getElementById('loop-bpm');
-  if (bpmInput) {
-    bpmInput.value = Math.round(data.bpm || 120);
-    bpmInput.disabled = data.clock_source === 'launcher';
-  }
-
-  const qSel = document.getElementById('loop-quantize');
-  if (qSel && qSel.value !== data.quantize) {
-    qSel.value = data.quantize || 'free';
-  }
-
-  const barLabel = document.getElementById('loop-bar-label');
-  if (barLabel) barLabel.textContent = 'BAR ' + ((data.bar || 0) + 1);
-  const dotsEl = document.getElementById('loop-beat-dots');
-  if (dotsEl) {
-    const bpb = data.beats_per_bar || 4;
-    const dots = dotsEl.querySelectorAll('.beat-dot');
-    while (dots.length < bpb) {
-      dotsEl.appendChild(Object.assign(document.createElement('span'), {className:'beat-dot'}));
-    }
-    const allDots = dotsEl.querySelectorAll('.beat-dot');
-    allDots.forEach((d, i) => {
-      d.style.display = i < bpb ? '' : 'none';
-      d.classList.toggle('active', i === (data.beat || 0) && data.transport_running);
-    });
-  }
-}
-
-function _renderLooperSlots(container, slots) {
-  container.innerHTML = slots.map(s => `
-    <div class="card looper-slot" id="loop-slot-${s.slot_id}">
-      <div class="card-header">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <strong>Slot ${s.slot_id + 1}</strong>
-          <span class="rec-state-badge ${s.state}" id="loop-badge-${s.slot_id}">${_loopStateLabel(s.state)}</span>
-        </div>
-        <span style="font-size:11px;color:var(--text-muted);" id="loop-info-${s.slot_id}">
-          ${s.event_count} events · ${s.length}s
-        </span>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-        <select id="loop-src-${s.slot_id}" style="flex:1;min-width:120px;" onchange="loopConfigure(${s.slot_id})">
-          <option value="">-- Source --</option>
-        </select>
-        <select id="loop-dst-${s.slot_id}" style="flex:1;min-width:120px;" onchange="loopConfigure(${s.slot_id})">
-          <option value="">-- Destination --</option>
-        </select>
-      </div>
-      <div class="btn-group" style="flex-wrap:wrap;gap:6px;">
-        <button class="btn btn-accent" onclick="loopRecord(${s.slot_id})">&#9210; REC</button>
-        <button class="btn" onclick="loopPlay(${s.slot_id})">&#9654; Play</button>
-        <button class="btn" onclick="loopStop(${s.slot_id})">&#9632; Stop</button>
-        <button class="btn btn-danger" onclick="loopClear(${s.slot_id})">&#10005; Clear</button>
-      </div>
-    </div>
-  `).join('');
-  // Populate device dropdowns
-  _populateLooperDeviceDropdowns(slots);
-}
-
-async function _populateLooperDeviceDropdowns(slots) {
-  const devData = await api('/devices');
-  const devices = devData || [];
-  slots.forEach(s => {
-    const srcSel = document.getElementById(`loop-src-${s.slot_id}`);
-    const dstSel = document.getElementById(`loop-dst-${s.slot_id}`);
-    if (srcSel) {
-      devices.forEach(d => {
-        if (d.direction !== 'out') {
-          const opt = new Option(d.name, d.name, false, d.name === s.source);
-          srcSel.add(opt);
-        }
-      });
-    }
-    if (dstSel) {
-      devices.forEach(d => {
-        if (d.direction !== 'in') {
-          const opt = new Option(d.name, d.name, false, d.name === s.destination);
-          dstSel.add(opt);
-        }
-      });
-    }
-  });
-}
-
-function _updateLooperSlots(slots) {
-  slots.forEach(s => {
-    const badge = document.getElementById(`loop-badge-${s.slot_id}`);
-    if (badge) {
-      badge.textContent = _loopStateLabel(s.state);
-      badge.className = 'rec-state-badge ' + s.state;
-    }
-    const info = document.getElementById(`loop-info-${s.slot_id}`);
-    if (info) info.textContent = `${s.event_count} events · ${s.length}s`;
-  });
-}
-
-function _loopStateLabel(state) {
-  const labels = {empty:'EMPTY', count_in:'COUNT IN', recording:'● REC',
-                  playing:'▶ LOOP', overdubbing:'● DUB', stopped:'STOPPED'};
-  return labels[state] || state.toUpperCase();
-}
-
-async function loopRecord(slot)    { await api(`/looper/${slot}/record`,    { method: 'POST' }); }
-async function loopPlay(slot)      { await api(`/looper/${slot}/play`,      { method: 'POST' }); }
-async function loopStop(slot)      { await api(`/looper/${slot}/stop`,      { method: 'POST' }); }
-async function loopClear(slot)     { await api(`/looper/${slot}/clear`,     { method: 'POST' }); }
-
-async function loopConfigure(slot) {
-  const src = document.getElementById(`loop-src-${slot}`)?.value || '';
-  const dst = document.getElementById(`loop-dst-${slot}`)?.value || '';
-  await api(`/looper/${slot}/configure`, { method: 'POST', body: { source: src, destination: dst } });
-}
-
-async function loopSetClockSource(source) { await api('/looper/clock', { method: 'POST', body: { source } }); }
-async function loopSetBpm(bpm)            { await api('/looper/clock', { method: 'POST', body: { bpm: parseFloat(bpm) } }); }
-async function loopSetQuantize(q)         { await api('/looper/clock', { method: 'POST', body: { quantize: q } }); }
-function loopAdjustBpm(delta) {
-  const input = document.getElementById('loop-bpm');
-  if (!input || input.disabled) return;
-  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
-  input.value = bpm;
-  loopSetBpm(bpm);
+function closeInfoPopover() {
+  document.getElementById('info-popover')?.classList.remove('active');
+  document.removeEventListener('click', _closeInfoOnOutside);
 }
 
 // --- MIDI Panic (silence all notes) ---
@@ -2015,7 +2024,10 @@ window.addEventListener('hashchange', handleHash);
 
 // --- Init ---
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Load settings first so performance mode is applied before any page renders
+  const settings = await api('/settings');
+  _updatePerfBtn(!!settings.performance_mode);
   handleHash();
   startPolling();
 });

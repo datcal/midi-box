@@ -93,6 +93,10 @@ class ClipLauncher:
         # Tick subscribers — called on each tick with (tick, beat, bar, running)
         self._tick_subscribers: list = []
 
+        # External BPM detection (measured from incoming 0xF8 timestamps)
+        self._ext_bpm: float | None = None
+        self._last_ext_clock_time: float | None = None
+
         MIDI_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -188,6 +192,18 @@ class ClipLauncher:
             return
 
         if message.type == "clock":
+            # Measure inter-tick interval to detect external BPM (24 PPQ = 60/(bpm*24) per tick)
+            now = time.monotonic()
+            if self._last_ext_clock_time is not None:
+                interval = now - self._last_ext_clock_time
+                if 0.001 < interval < 2.0:  # sanity: 30–60000 BPM range
+                    detected = 60.0 / (interval * 24)
+                    if self._ext_bpm is None:
+                        self._ext_bpm = detected
+                    else:
+                        # Exponential moving average (fast response, smooth output)
+                        self._ext_bpm = self._ext_bpm * 0.85 + detected * 0.15
+            self._last_ext_clock_time = now
             # External 0xF8 = 24 PPQ, each tick = 4 internal ticks
             for _ in range(CLOCK_EMIT_INTERVAL):
                 self._advance_tick()
@@ -627,6 +643,7 @@ class ClipLauncher:
                 "clock": {
                     "mode": self.clock_mode,
                     "bpm": self.bpm,
+                    "ext_bpm": round(self._ext_bpm, 1) if self._ext_bpm else None,
                     "beats_per_bar": self.beats_per_bar,
                     "quantum": self.quantum,
                     "tick": self._tick,
@@ -645,6 +662,7 @@ class ClipLauncher:
                 "beat": self._beat,
                 "bar": self._bar,
                 "bpm": self.bpm,
+                "ext_bpm": round(self._ext_bpm, 1) if self._ext_bpm else None,
                 "running": self._transport_running,
                 "layers": [
                     {
