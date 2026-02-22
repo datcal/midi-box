@@ -7,10 +7,17 @@ MIDI Looper — real-time loop recorder for MIDI Box.
   - Overdub: layer new notes on top while already playing
   - Clear: wipe all recorded data
 
+Supports clock-synced recording with BPM, quantization, and count-in:
+  - Clock source: standalone (own BPM), launcher (sync to clip launcher),
+    or external (MIDI clock from hardware)
+  - Quantize: free, 1/16, 1/8, 1/4, bar, 2bar, 4bar
+  - Count-in: waits for next quantum boundary before recording starts
+  - Quantized loop length: snaps first recording length to quantum boundary
+
 Usage pattern (Ableton-style):
   1. Configure slot (source + destination)
-  2. Press REC → starts recording
-  3. Press REC again → stops recording, begins looping
+  2. Press REC → count-in (if quantized) → starts recording
+  3. Press REC again → stops recording, begins looping (length quantized)
   4. Press REC while playing → enters overdub mode
   5. Press REC while overdubbing → commits overdub, keeps looping
   6. Press STOP → stop playback (keeps content)
@@ -32,6 +39,32 @@ logger = logging.getLogger("midi-box.looper")
 NUM_SLOTS = 4
 MAX_LOOP_SECONDS = 120.0   # hard cap on a single loop recording
 
+INTERNAL_PPQ = 96
+
+_FIXED_QUANTUM_TICKS = {
+    "1/16": INTERNAL_PPQ // 4,   # 24
+    "1/8":  INTERNAL_PPQ // 2,   # 48
+    "1/4":  INTERNAL_PPQ,        # 96
+}
+
+VALID_QUANTIZE = ("free", "1/16", "1/8", "1/4", "bar", "2bar", "4bar")
+
+
+def _quantum_ticks(quantize: str, beats_per_bar: int) -> int:
+    """Return tick count for a quantum value. Returns 0 for 'free'."""
+    if quantize == "free":
+        return 0
+    if quantize in _FIXED_QUANTUM_TICKS:
+        return _FIXED_QUANTUM_TICKS[quantize]
+    tpbar = INTERNAL_PPQ * beats_per_bar
+    if quantize == "bar":
+        return tpbar
+    if quantize == "2bar":
+        return tpbar * 2
+    if quantize == "4bar":
+        return tpbar * 4
+    return 0
+
 
 # ---------------------------------------------------------------------------
 # LoopSlot
@@ -46,7 +79,7 @@ class LoopSlot:
         self.destination = ""
         self.midi_channel: Optional[int] = None
 
-        # State machine: empty → recording → playing ↔ overdubbing → stopped
+        # State machine: empty → count_in → recording → playing ↔ overdubbing → stopped
         self.state = "empty"
 
         self._events: list[tuple] = []     # (offset_seconds, mido.Message)
@@ -56,6 +89,9 @@ class LoopSlot:
         self._record_start: float = 0.0
         # The playback worker signals itself through this event
         self._stop_event: Optional[threading.Event] = None
+
+        # Count-in
+        self._count_in_event = threading.Event()
 
     # ------------------------------------------------------------------
     # Recording helpers
@@ -74,11 +110,26 @@ class LoopSlot:
             self.state = "recording"
         self._record_start = time.monotonic()
 
-    def stop_recording(self) -> bool:
+    def stop_recording(self, quantize: str = "free", bpm: float = 120.0,
+                       beats_per_bar: int = 4) -> bool:
         """Commit the current recording pass.  Returns True if the slot now
         has playable content."""
         if self.state == "recording":
-            self.length = time.monotonic() - self._record_start
+            raw_length = time.monotonic() - self._record_start
+
+            # Quantize the loop length
+            if quantize != "free":
+                qt = _quantum_ticks(quantize, beats_per_bar)
+                if qt > 0 and bpm > 0:
+                    tick_interval = 60.0 / (bpm * INTERNAL_PPQ)
+                    elapsed_ticks = raw_length / tick_interval
+                    quantized_ticks = ((int(elapsed_ticks) // qt) + 1) * qt
+                    self.length = quantized_ticks * tick_interval
+                else:
+                    self.length = raw_length
+            else:
+                self.length = raw_length
+
             if self.length < 0.1 or not self._events:
                 self._events = []
                 self.length = 0.0
@@ -116,6 +167,7 @@ class LoopSlot:
     def clear(self):
         if self._stop_event:
             self._stop_event.set()
+        self._count_in_event.set()
         self.state = "empty"
         self._events = []
         self._overdub = []
@@ -150,6 +202,127 @@ class MidiLooper:
         self._threads: dict[int, threading.Thread] = {}
         self._stops:   dict[int, threading.Event]  = {}
 
+        # Clock / quantize settings (global, shared across all slots)
+        self._clock_source = "standalone"   # "standalone", "launcher", "external"
+        self._bpm = 120.0
+        self._quantize = "free"
+        self._beats_per_bar = 4
+        self._launcher = None               # reference to ClipLauncher
+
+        # Clock position
+        self._tick = 0
+        self._beat = 0
+        self._bar = 0
+        self._transport_running = False
+
+        # Standalone clock thread
+        self._clock_thread: Optional[threading.Thread] = None
+        self._clock_running = False
+        self._next_tick_time = 0.0
+
+    # ------------------------------------------------------------------
+    # Clock / quantize configuration
+    # ------------------------------------------------------------------
+
+    def set_clock_source(self, source: str) -> None:
+        if source not in ("standalone", "launcher", "external"):
+            return
+        old = self._clock_source
+        self._clock_source = source
+        if old != source:
+            self._stop_standalone_clock()
+        logger.info(f"Looper clock source: {source}")
+
+    def set_bpm(self, bpm: float) -> None:
+        self._bpm = max(20.0, min(300.0, bpm))
+
+    def set_quantize(self, quantize: str) -> None:
+        if quantize in VALID_QUANTIZE:
+            self._quantize = quantize
+
+    def set_beats_per_bar(self, beats: int) -> None:
+        self._beats_per_bar = max(1, min(16, beats))
+
+    # ------------------------------------------------------------------
+    # Standalone clock
+    # ------------------------------------------------------------------
+
+    def _start_standalone_clock(self) -> None:
+        if self._clock_running:
+            return
+        self._clock_running = True
+        self._tick = 0
+        self._beat = 0
+        self._bar = 0
+        self._transport_running = True
+        self._next_tick_time = time.perf_counter()
+        self._clock_thread = threading.Thread(
+            target=self._standalone_clock_loop, daemon=True,
+            name="looper-clock",
+        )
+        self._clock_thread.start()
+
+    def _stop_standalone_clock(self) -> None:
+        self._clock_running = False
+        self._transport_running = False
+        if self._clock_thread:
+            self._clock_thread.join(timeout=1)
+            self._clock_thread = None
+
+    def _standalone_clock_loop(self) -> None:
+        while self._clock_running:
+            if not self._transport_running:
+                time.sleep(0.001)
+                continue
+            now = time.perf_counter()
+            if now >= self._next_tick_time:
+                tick_interval = 60.0 / (self._bpm * INTERNAL_PPQ)
+                self._next_tick_time += tick_interval
+                if self._next_tick_time < now:
+                    self._next_tick_time = now + tick_interval
+                self._on_tick(self._tick, self._beat, self._bar, True)
+                self._tick += 1
+                if self._tick % INTERNAL_PPQ == 0:
+                    self._beat += 1
+                    if self._beat >= self._beats_per_bar:
+                        self._beat = 0
+                        self._bar += 1
+            time.sleep(0.0002)
+
+    # ------------------------------------------------------------------
+    # Tick callback
+    # ------------------------------------------------------------------
+
+    def _on_tick(self, tick: int, beat: int, bar: int, running: bool) -> None:
+        self._tick = tick
+        self._beat = beat
+        self._bar = bar
+        self._transport_running = running
+
+        qt = _quantum_ticks(self._quantize, self._beats_per_bar)
+        if qt <= 0 or tick == 0:
+            return
+
+        if tick % qt == 0:
+            # Signal all slots in count_in state
+            for slot in self.slots:
+                if slot.state == "count_in":
+                    slot._count_in_event.set()
+
+    def _subscribe_to_clock(self) -> None:
+        if self._clock_source == "launcher" and self._launcher:
+            self._launcher.register_tick_subscriber(self._on_tick)
+            if not self._launcher._transport_running:
+                self._launcher.transport_start()
+        elif self._clock_source == "standalone":
+            self._start_standalone_clock()
+
+    def _unsubscribe_from_clock(self) -> None:
+        if self._launcher:
+            self._launcher.unregister_tick_subscriber(self._on_tick)
+        if self._clock_source == "standalone":
+            self._stop_standalone_clock()
+
     # ------------------------------------------------------------------
     # Incoming MIDI feed (called by main.py on every message)
     # ------------------------------------------------------------------
@@ -174,23 +347,59 @@ class MidiLooper:
         return {"ok": True}
 
     def record(self, slot_id: int) -> dict:
-        """Toggle record: arm → record → stop+play → overdub → stop+play."""
+        """Toggle record: arm → count_in/record → stop+play → overdub → stop+play."""
         slot = self._get(slot_id)
         if not slot:
             return {"ok": False, "error": "Invalid slot"}
         if not slot.source or not slot.destination:
             return {"ok": False, "error": "Configure source and destination first"}
 
+        if slot.state == "count_in":
+            # Cancel count-in
+            slot._count_in_event.set()
+            slot.state = "empty"
+            # Unsubscribe if no other slots need clock
+            if not any(s.state == "count_in" for s in self.slots):
+                self._unsubscribe_from_clock()
+            return {"ok": True, "state": slot.state}
+
         if slot.state in ("empty", "stopped"):
-            slot.start_recording()
+            if self._quantize == "free":
+                slot.start_recording()
+            else:
+                # Enter count-in
+                slot.state = "count_in"
+                slot._count_in_event.clear()
+                self._subscribe_to_clock()
+                # Start count-in wait in background
+                t = threading.Thread(
+                    target=self._count_in_worker, args=(slot,),
+                    daemon=True, name=f"looper-{slot_id}-count-in",
+                )
+                t.start()
+
         elif slot.state == "playing":
             slot.start_recording()          # → overdubbing
+
         elif slot.state == "recording":
-            had_content = slot.stop_recording()
+            bpm = self._effective_bpm()
+            had_content = slot.stop_recording(
+                quantize=self._quantize, bpm=bpm,
+                beats_per_bar=self._beats_per_bar,
+            )
             if had_content:
                 self._start_playback(slot)
+            # Unsubscribe if no other slots need clock
+            if not any(s.state in ("count_in", "recording") for s in self.slots):
+                self._unsubscribe_from_clock()
+
         elif slot.state == "overdubbing":
-            slot.stop_recording()           # merges, stays playing
+            bpm = self._effective_bpm()
+            slot.stop_recording(
+                quantize=self._quantize, bpm=bpm,
+                beats_per_bar=self._beats_per_bar,
+            )
+
         return {"ok": True, "state": slot.state}
 
     def play(self, slot_id: int) -> dict:
@@ -207,9 +416,19 @@ class MidiLooper:
         slot = self._get(slot_id)
         if not slot:
             return {"ok": False, "error": "Invalid slot"}
+        if slot.state == "count_in":
+            slot._count_in_event.set()
+            slot.state = "empty"
+            if not any(s.state == "count_in" for s in self.slots):
+                self._unsubscribe_from_clock()
+            return {"ok": True, "state": slot.state}
         self._stop_playback(slot)
         if slot.state == "recording":
-            slot.stop_recording()
+            bpm = self._effective_bpm()
+            slot.stop_recording(
+                quantize=self._quantize, bpm=bpm,
+                beats_per_bar=self._beats_per_bar,
+            )
             slot.state = "stopped" if slot._events else "empty"
         elif slot.state in ("playing", "overdubbing"):
             slot.state = "stopped"
@@ -224,11 +443,44 @@ class MidiLooper:
         return {"ok": True}
 
     def get_status(self) -> dict:
-        return {"slots": [s.get_status() for s in self.slots]}
+        bpm = self._effective_bpm()
+        return {
+            "slots": [s.get_status() for s in self.slots],
+            "clock_source": self._clock_source,
+            "bpm": bpm,
+            "quantize": self._quantize,
+            "beats_per_bar": self._beats_per_bar,
+            "beat": self._beat,
+            "bar": self._bar,
+            "tick": self._tick,
+            "transport_running": self._transport_running,
+        }
 
     def close(self):
         for slot in self.slots:
             self._stop_playback(slot)
+        self._unsubscribe_from_clock()
+        self._stop_standalone_clock()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _effective_bpm(self) -> float:
+        if self._clock_source == "launcher" and self._launcher:
+            return self._launcher.bpm
+        return self._bpm
+
+    def _count_in_worker(self, slot: LoopSlot) -> None:
+        """Wait for the count-in boundary, then start recording on slot."""
+        triggered = slot._count_in_event.wait(timeout=30.0)
+        if not triggered or slot.state != "count_in":
+            if slot.state == "count_in":
+                slot.state = "empty"
+                logger.info(f"Looper slot {slot.slot_id}: count-in timed out")
+            return
+        slot.start_recording()
+        logger.info(f"Looper slot {slot.slot_id}: count-in complete, recording")
 
     # ------------------------------------------------------------------
     # Playback internals

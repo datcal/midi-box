@@ -43,6 +43,7 @@ function loadPageData(page) {
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
     case 'recorder': loadRecorder(); break;
+    case 'looper': loadLooper(); break;
     case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
@@ -1365,7 +1366,7 @@ function _applyRecorderState(data) {
   // Badge
   const badge = document.getElementById('rec-status-badge');
   if (badge) {
-    const labels = {idle:'IDLE', recording:'● REC', playing:'▶ PLAYING', stopped:'STOPPED'};
+    const labels = {idle:'IDLE', count_in:'COUNT IN', recording:'● REC', playing:'▶ PLAYING', stopped:'STOPPED'};
     badge.textContent = labels[recState] || recState.toUpperCase();
     badge.className   = 'rec-state-badge ' + recState;
   }
@@ -1373,9 +1374,16 @@ function _applyRecorderState(data) {
   // Toggle button
   const toggleBtn = document.getElementById('rec-toggle-btn');
   if (toggleBtn) {
-    toggleBtn.textContent = recState === 'recording' ? '⏹ Stop Recording' : '⏺ RECORD';
-    toggleBtn.className   = recState === 'recording'
-      ? 'btn btn-danger' : 'btn btn-accent';
+    if (recState === 'recording') {
+      toggleBtn.textContent = '⏹ Stop Recording';
+      toggleBtn.className = 'btn btn-danger';
+    } else if (recState === 'count_in') {
+      toggleBtn.textContent = '⏹ Cancel';
+      toggleBtn.className = 'btn btn-danger';
+    } else {
+      toggleBtn.textContent = '⏺ RECORD';
+      toggleBtn.className = 'btn btn-accent';
+    }
   }
 
   // Other buttons
@@ -1412,6 +1420,56 @@ function _applyRecorderState(data) {
   // Note feed
   if (data.recent_events) {
     renderNoteFeed(data.recent_events);
+  }
+
+  // Clock bar
+  _applyRecClockState(data);
+}
+
+function _applyRecClockState(data) {
+  // Clock source buttons
+  const sources = ['standalone', 'launcher', 'external'];
+  const ids = ['rec-clock-standalone', 'rec-clock-launcher', 'rec-clock-ext'];
+  sources.forEach((s, i) => {
+    const btn = document.getElementById(ids[i]);
+    if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
+  });
+
+  // BPM — disabled when synced to launcher
+  const bpmInput = document.getElementById('rec-bpm');
+  if (bpmInput) {
+    bpmInput.value = Math.round(data.bpm || 120);
+    bpmInput.disabled = data.clock_source === 'launcher';
+  }
+
+  // Quantize selector
+  const qSel = document.getElementById('rec-quantize');
+  if (qSel && qSel.value !== data.quantize) {
+    qSel.value = data.quantize || 'free';
+  }
+
+  // Beat display
+  const barLabel = document.getElementById('rec-bar-label');
+  if (barLabel) barLabel.textContent = 'BAR ' + ((data.bar || 0) + 1);
+  const dotsEl = document.getElementById('rec-beat-dots');
+  if (dotsEl) {
+    const bpb = data.beats_per_bar || 4;
+    const dots = dotsEl.querySelectorAll('.beat-dot');
+    // Adjust dot count
+    while (dots.length < bpb) {
+      dotsEl.appendChild(Object.assign(document.createElement('span'), {className:'beat-dot'}));
+    }
+    const allDots = dotsEl.querySelectorAll('.beat-dot');
+    allDots.forEach((d, i) => {
+      d.style.display = i < bpb ? '' : 'none';
+      d.classList.toggle('active', i === (data.beat || 0) && data.transport_running);
+    });
+    // Count-in pulse
+    if (recState === 'count_in') {
+      allDots.forEach(d => d.classList.add('count-in-pulse'));
+    } else {
+      allDots.forEach(d => d.classList.remove('count-in-pulse'));
+    }
   }
 }
 
@@ -1457,6 +1515,17 @@ async function recStop()                 { await api('/recorder/stop',      { me
 async function recClear()                { await api('/recorder/clear',     { method: 'POST' }); }
 async function recSetAutoPlay(val)       { await api('/recorder/auto_play', { method: 'POST', body: { value: val } }); }
 
+async function recSetClockSource(source) { await api('/recorder/clock', { method: 'POST', body: { source } }); }
+async function recSetBpm(bpm)            { await api('/recorder/clock', { method: 'POST', body: { bpm: parseFloat(bpm) } }); }
+async function recSetQuantize(q)         { await api('/recorder/clock', { method: 'POST', body: { quantize: q } }); }
+function recAdjustBpm(delta) {
+  const input = document.getElementById('rec-bpm');
+  if (!input || input.disabled) return;
+  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
+  input.value = bpm;
+  recSetBpm(bpm);
+}
+
 async function recSave() {
   const name = document.getElementById('rec-save-name')?.value.trim() || null;
   const msg  = document.getElementById('rec-save-msg');
@@ -1498,6 +1567,178 @@ async function recDelete(name) {
   if (!confirm(`Delete recording "${name}"?`)) return;
   await api(`/recorder/recordings/${encodeURIComponent(name)}`, { method: 'DELETE' });
   loadRecordings();
+}
+
+// --- MIDI Looper ---
+
+let loopInterval = null;
+
+async function loadLooper() {
+  const data = await api('/looper');
+  _applyLooperState(data);
+  if (loopInterval) clearInterval(loopInterval);
+  loopInterval = setInterval(pollLooper, 400);
+}
+
+async function pollLooper() {
+  if (currentPage !== 'looper') {
+    clearInterval(loopInterval);
+    loopInterval = null;
+    return;
+  }
+  const data = await api('/looper');
+  _applyLooperState(data);
+}
+
+function _applyLooperState(data) {
+  if (!data) return;
+
+  // Clock bar
+  _applyLoopClockState(data);
+
+  // Slots
+  const container = document.getElementById('looper-slots');
+  if (!container) return;
+
+  const slots = data.slots || [];
+  if (!container.children.length || container.children.length !== slots.length) {
+    _renderLooperSlots(container, slots);
+  } else {
+    _updateLooperSlots(slots);
+  }
+}
+
+function _applyLoopClockState(data) {
+  const sources = ['standalone', 'launcher', 'external'];
+  const ids = ['loop-clock-standalone', 'loop-clock-launcher', 'loop-clock-ext'];
+  sources.forEach((s, i) => {
+    const btn = document.getElementById(ids[i]);
+    if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
+  });
+
+  const bpmInput = document.getElementById('loop-bpm');
+  if (bpmInput) {
+    bpmInput.value = Math.round(data.bpm || 120);
+    bpmInput.disabled = data.clock_source === 'launcher';
+  }
+
+  const qSel = document.getElementById('loop-quantize');
+  if (qSel && qSel.value !== data.quantize) {
+    qSel.value = data.quantize || 'free';
+  }
+
+  const barLabel = document.getElementById('loop-bar-label');
+  if (barLabel) barLabel.textContent = 'BAR ' + ((data.bar || 0) + 1);
+  const dotsEl = document.getElementById('loop-beat-dots');
+  if (dotsEl) {
+    const bpb = data.beats_per_bar || 4;
+    const dots = dotsEl.querySelectorAll('.beat-dot');
+    while (dots.length < bpb) {
+      dotsEl.appendChild(Object.assign(document.createElement('span'), {className:'beat-dot'}));
+    }
+    const allDots = dotsEl.querySelectorAll('.beat-dot');
+    allDots.forEach((d, i) => {
+      d.style.display = i < bpb ? '' : 'none';
+      d.classList.toggle('active', i === (data.beat || 0) && data.transport_running);
+    });
+  }
+}
+
+function _renderLooperSlots(container, slots) {
+  container.innerHTML = slots.map(s => `
+    <div class="card looper-slot" id="loop-slot-${s.slot_id}">
+      <div class="card-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <strong>Slot ${s.slot_id + 1}</strong>
+          <span class="rec-state-badge ${s.state}" id="loop-badge-${s.slot_id}">${_loopStateLabel(s.state)}</span>
+        </div>
+        <span style="font-size:11px;color:var(--text-muted);" id="loop-info-${s.slot_id}">
+          ${s.event_count} events · ${s.length}s
+        </span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+        <select id="loop-src-${s.slot_id}" style="flex:1;min-width:120px;" onchange="loopConfigure(${s.slot_id})">
+          <option value="">-- Source --</option>
+        </select>
+        <select id="loop-dst-${s.slot_id}" style="flex:1;min-width:120px;" onchange="loopConfigure(${s.slot_id})">
+          <option value="">-- Destination --</option>
+        </select>
+      </div>
+      <div class="btn-group" style="flex-wrap:wrap;gap:6px;">
+        <button class="btn btn-accent" onclick="loopRecord(${s.slot_id})">&#9210; REC</button>
+        <button class="btn" onclick="loopPlay(${s.slot_id})">&#9654; Play</button>
+        <button class="btn" onclick="loopStop(${s.slot_id})">&#9632; Stop</button>
+        <button class="btn btn-danger" onclick="loopClear(${s.slot_id})">&#10005; Clear</button>
+      </div>
+    </div>
+  `).join('');
+  // Populate device dropdowns
+  _populateLooperDeviceDropdowns(slots);
+}
+
+async function _populateLooperDeviceDropdowns(slots) {
+  const devData = await api('/devices');
+  const devices = devData || [];
+  slots.forEach(s => {
+    const srcSel = document.getElementById(`loop-src-${s.slot_id}`);
+    const dstSel = document.getElementById(`loop-dst-${s.slot_id}`);
+    if (srcSel) {
+      devices.forEach(d => {
+        if (d.direction !== 'out') {
+          const opt = new Option(d.name, d.name, false, d.name === s.source);
+          srcSel.add(opt);
+        }
+      });
+    }
+    if (dstSel) {
+      devices.forEach(d => {
+        if (d.direction !== 'in') {
+          const opt = new Option(d.name, d.name, false, d.name === s.destination);
+          dstSel.add(opt);
+        }
+      });
+    }
+  });
+}
+
+function _updateLooperSlots(slots) {
+  slots.forEach(s => {
+    const badge = document.getElementById(`loop-badge-${s.slot_id}`);
+    if (badge) {
+      badge.textContent = _loopStateLabel(s.state);
+      badge.className = 'rec-state-badge ' + s.state;
+    }
+    const info = document.getElementById(`loop-info-${s.slot_id}`);
+    if (info) info.textContent = `${s.event_count} events · ${s.length}s`;
+  });
+}
+
+function _loopStateLabel(state) {
+  const labels = {empty:'EMPTY', count_in:'COUNT IN', recording:'● REC',
+                  playing:'▶ LOOP', overdubbing:'● DUB', stopped:'STOPPED'};
+  return labels[state] || state.toUpperCase();
+}
+
+async function loopRecord(slot)    { await api(`/looper/${slot}/record`,    { method: 'POST' }); }
+async function loopPlay(slot)      { await api(`/looper/${slot}/play`,      { method: 'POST' }); }
+async function loopStop(slot)      { await api(`/looper/${slot}/stop`,      { method: 'POST' }); }
+async function loopClear(slot)     { await api(`/looper/${slot}/clear`,     { method: 'POST' }); }
+
+async function loopConfigure(slot) {
+  const src = document.getElementById(`loop-src-${slot}`)?.value || '';
+  const dst = document.getElementById(`loop-dst-${slot}`)?.value || '';
+  await api(`/looper/${slot}/configure`, { method: 'POST', body: { source: src, destination: dst } });
+}
+
+async function loopSetClockSource(source) { await api('/looper/clock', { method: 'POST', body: { source } }); }
+async function loopSetBpm(bpm)            { await api('/looper/clock', { method: 'POST', body: { bpm: parseFloat(bpm) } }); }
+async function loopSetQuantize(q)         { await api('/looper/clock', { method: 'POST', body: { quantize: q } }); }
+function loopAdjustBpm(delta) {
+  const input = document.getElementById('loop-bpm');
+  if (!input || input.disabled) return;
+  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
+  input.value = bpm;
+  loopSetBpm(bpm);
 }
 
 // --- MIDI Panic (silence all notes) ---

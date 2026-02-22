@@ -1211,6 +1211,39 @@ body {
   50%       { opacity: 0.4; }
 }
 
+.rec-state-badge.count_in {
+  background: rgba(155, 89, 182, 0.2);
+  color: #9b59b6;
+  border-color: #9b59b6;
+  animation: rec-blink 0.6s step-end infinite;
+}
+
+.rec-state-badge.overdubbing {
+  background: rgba(230, 126, 34, 0.2);
+  color: #e67e22;
+  border-color: #e67e22;
+  animation: rec-blink 1s step-end infinite;
+}
+
+.rec-state-badge.empty {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.beat-dot.count-in-pulse {
+  animation: count-in-glow 0.5s ease-in-out infinite alternate;
+}
+
+@keyframes count-in-glow {
+  0%   { box-shadow: 0 0 2px rgba(155, 89, 182, 0.3); }
+  100% { box-shadow: 0 0 8px rgba(155, 89, 182, 0.8); background: #9b59b6; }
+}
+
+.looper-slot {
+  margin-bottom: 8px;
+}
+
 .rec-note-feed {
   max-height: 320px;
   overflow-y: auto;

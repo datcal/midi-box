@@ -23,6 +23,18 @@ DEFAULT_STATE = {
     "routes": [],
     "device_overrides": {},  # {device_name: {direction, device_type, midi_channel}}
     "launcher": {},  # clip launcher state (layers, clips, clock config)
+    "recorder_clock": {
+        "source": "standalone",
+        "bpm": 120.0,
+        "quantize": "free",
+        "beats_per_bar": 4,
+    },
+    "looper_clock": {
+        "source": "standalone",
+        "bpm": 120.0,
+        "quantize": "free",
+        "beats_per_bar": 4,
+    },
     "settings": {
         "mode": "standalone",
         "log_level": "INFO",
@@ -123,6 +135,20 @@ class StateManager:
         if "device_overrides" not in self.state:
             self.state["device_overrides"] = {}
         self.state["device_overrides"][name] = config
+        self.save()
+
+    def get_recorder_clock(self) -> dict:
+        return self.state.get("recorder_clock", {})
+
+    def set_recorder_clock(self, data: dict):
+        self.state["recorder_clock"] = data
+        self.save()
+
+    def get_looper_clock(self) -> dict:
+        return self.state.get("looper_clock", {})
+
+    def set_looper_clock(self, data: dict):
+        self.state["looper_clock"] = data
         self.save()
 
     def get_settings(self) -> dict:

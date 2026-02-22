@@ -733,6 +733,11 @@ def create_app(bridge):
     def api_looper_clear(slot_id):
         return jsonify(_cmd("looper.clear", {"slot_id": slot_id}))
 
+    @app.route("/api/looper/clock", methods=["POST"])
+    def api_looper_clock():
+        data = request.json or {}
+        return jsonify(_cmd("looper.clock", data))
+
     # ---------------------------------------------------------------
     # API: Quick Recorder
     # ---------------------------------------------------------------
@@ -781,6 +786,11 @@ def create_app(bridge):
             return jsonify({"ok": False, "error": "Not found"}), 404
         return send_file(path, as_attachment=True, download_name=name + ".mid",
                          mimetype="audio/midi")
+
+    @app.route("/api/recorder/clock", methods=["POST"])
+    def api_recorder_clock():
+        data = request.json or {}
+        return jsonify(_cmd("recorder.clock", data))
 
     @app.route("/api/system/restart", methods=["POST"])
     def api_system_restart():

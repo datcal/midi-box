@@ -128,6 +128,10 @@ class MidiBox:
         self.launcher._output_devices_callback = self._get_output_device_names
         self.router._clock_callback = self.launcher.on_clock_message
 
+        # Wire launcher reference for clock sync
+        self.recorder._launcher = self.launcher
+        self.looper._launcher = self.launcher
+
         # Open MIDI devices (real or mock)
         if self.args.mock:
             self._init_mock_devices()
@@ -145,6 +149,9 @@ class MidiBox:
 
         # Initialize clip launcher (restore state or auto-create layers)
         self._init_launcher()
+
+        # Restore recorder/looper clock settings
+        self._restore_clock_settings()
 
         # Start hotplug monitor for USB devices (skip in mock mode)
         if not self.args.mock:
@@ -385,6 +392,22 @@ class MidiBox:
                 )
             logger.info(f"Launcher: auto-created {len(self.launcher.layers)} layers")
 
+    def _restore_clock_settings(self):
+        """Restore recorder/looper clock settings from saved state."""
+        rec_clock = self.state.get_recorder_clock()
+        if rec_clock:
+            self.recorder.set_clock_source(rec_clock.get("source", "standalone"))
+            self.recorder.set_bpm(rec_clock.get("bpm", 120.0))
+            self.recorder.set_quantize(rec_clock.get("quantize", "free"))
+            self.recorder.set_beats_per_bar(rec_clock.get("beats_per_bar", 4))
+
+        loop_clock = self.state.get_looper_clock()
+        if loop_clock:
+            self.looper.set_clock_source(loop_clock.get("source", "standalone"))
+            self.looper.set_bpm(loop_clock.get("bpm", 120.0))
+            self.looper.set_quantize(loop_clock.get("quantize", "free"))
+            self.looper.set_beats_per_bar(loop_clock.get("beats_per_bar", 4))
+
     def _get_output_device_names(self) -> list[str]:
         """Return list of output device names (for clock output)."""
         return [d.name for d in self.registry.get_output_devices()]
@@ -399,6 +422,18 @@ class MidiBox:
         self.state.set_routes(self.router.dump_routes())
         self.state.set_clock_source(self.router._clock_source)
         self.state.set_launcher_state(self.launcher.save_state())
+        self.state.set_recorder_clock({
+            "source": self.recorder._clock_source,
+            "bpm": self.recorder._bpm,
+            "quantize": self.recorder._quantize,
+            "beats_per_bar": self.recorder._beats_per_bar,
+        })
+        self.state.set_looper_clock({
+            "source": self.looper._clock_source,
+            "bpm": self.looper._bpm,
+            "quantize": self.looper._quantize,
+            "beats_per_bar": self.looper._beats_per_bar,
+        })
         logger.info("State saved")
 
     def _start_web_ui(self):
@@ -634,6 +669,23 @@ class MidiBox:
             path = self.recorder.get_recording_path(params.get("name", ""))
             return {"ok": path is not None, "path": path}
 
+        elif action == "recorder.clock":
+            if "source" in params:
+                self.recorder.set_clock_source(params["source"])
+            if "bpm" in params:
+                self.recorder.set_bpm(float(params["bpm"]))
+            if "quantize" in params:
+                self.recorder.set_quantize(params["quantize"])
+            if "beats_per_bar" in params:
+                self.recorder.set_beats_per_bar(int(params["beats_per_bar"]))
+            self.state.set_recorder_clock({
+                "source": self.recorder._clock_source,
+                "bpm": self.recorder._bpm,
+                "quantize": self.recorder._quantize,
+                "beats_per_bar": self.recorder._beats_per_bar,
+            })
+            return {"ok": True}
+
         # --- Launcher ---
         elif action == "launcher.clock":
             if "mode" in params:
@@ -791,6 +843,23 @@ class MidiBox:
 
         elif action == "looper.clear":
             return self.looper.clear(params["slot_id"])
+
+        elif action == "looper.clock":
+            if "source" in params:
+                self.looper.set_clock_source(params["source"])
+            if "bpm" in params:
+                self.looper.set_bpm(float(params["bpm"]))
+            if "quantize" in params:
+                self.looper.set_quantize(params["quantize"])
+            if "beats_per_bar" in params:
+                self.looper.set_beats_per_bar(int(params["beats_per_bar"]))
+            self.state.set_looper_clock({
+                "source": self.looper._clock_source,
+                "bpm": self.looper._bpm,
+                "quantize": self.looper._quantize,
+                "beats_per_bar": self.looper._beats_per_bar,
+            })
+            return {"ok": True}
 
         # --- MIDI Panic ---
         elif action == "midi.panic":
