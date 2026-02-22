@@ -366,6 +366,14 @@ def create_app(bridge):
     def api_monitor_resume():
         return jsonify(_cmd("monitor.resume"))
 
+    @app.route("/api/performance/enable", methods=["POST"])
+    def api_performance_enable():
+        return jsonify(_cmd("performance.enable"))
+
+    @app.route("/api/performance/disable", methods=["POST"])
+    def api_performance_disable():
+        return jsonify(_cmd("performance.disable"))
+
     # ---------------------------------------------------------------
     # API: Settings
     # ---------------------------------------------------------------
@@ -382,6 +390,7 @@ def create_app(bridge):
             "total_routes": len(routes),
             "total_devices": len(devices),
             "clock_source": st.get("clock_source"),
+            "performance_mode": st.get("performance_mode", False),
         })
 
     @app.route("/api/settings/clock", methods=["POST"])

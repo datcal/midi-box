@@ -92,6 +92,8 @@ class MidiBox:
         self._running = False
         self._web_process = None
         self.bridge = None
+        self._performance_mode = False
+        self._verbose = getattr(args, "verbose", False)
 
     def start(self):
         self.log_buffer.install()
@@ -403,7 +405,8 @@ class MidiBox:
             # Read from USB gadget (Mac → Pi in DAW mode; different mechanism from rtmidi)
             if self.gadget and self.mode == "daw":
                 for msg in self.gadget.receive_from_host():
-                    self.midi_logger.log_input("Logic Pro", msg)
+                    if not self._performance_mode:
+                        self.midi_logger.log_input("Logic Pro", msg)
                     self.router.process_message("Logic Pro", msg)
 
             # Process commands from Flask process
@@ -566,6 +569,22 @@ class MidiBox:
         elif action == "monitor.resume":
             self.midi_logger.resume()
             return {"ok": True, "paused": False}
+
+        # --- Performance Mode ---
+        elif action == "performance.enable":
+            self._performance_mode = True
+            logging.getLogger().setLevel(logging.WARNING)
+            self.bridge.state["performance_mode"] = True
+            logger.warning("Performance mode ON — all logging suppressed")
+            return {"ok": True}
+
+        elif action == "performance.disable":
+            self._performance_mode = False
+            level = logging.DEBUG if self._verbose else logging.INFO
+            logging.getLogger().setLevel(level)
+            self.bridge.state["performance_mode"] = False
+            logger.info("Performance mode OFF — logging resumed")
+            return {"ok": True}
 
         # --- Launcher ---
         elif action == "launcher.clock":
@@ -793,13 +812,13 @@ class MidiBox:
         self.bridge.state["current_preset"] = self.presets.current_preset or "default"
         self.bridge.state["clock_source"] = self.router._clock_source
 
-        # MIDI log
-        self.bridge.state["midi_log"] = self.midi_logger.get_entries(limit=100)
-        self.bridge.state["midi_stats"] = self.midi_logger.get_stats()
-        self.bridge.state["midi_paused"] = self.midi_logger.is_paused
-
-        # Python app log
-        self.bridge.state["log_entries"] = self.log_buffer.get_entries(limit=200)
+        # MIDI log + Python app log — skipped in performance mode to reduce IPC overhead
+        self.bridge.state["performance_mode"] = self._performance_mode
+        if not self._performance_mode:
+            self.bridge.state["midi_log"] = self.midi_logger.get_entries(limit=100)
+            self.bridge.state["midi_stats"] = self.midi_logger.get_stats()
+            self.bridge.state["midi_paused"] = self.midi_logger.is_paused
+            self.bridge.state["log_entries"] = self.log_buffer.get_entries(limit=200)
 
         # Launcher
         status = self.launcher.get_status()
@@ -838,7 +857,8 @@ class MidiBox:
         """Called from rtmidi's thread immediately when a USB MIDI message arrives."""
         device = self.registry.find_by_port_id(port_name)
         source_name = device.name if device else port_name
-        self.midi_logger.log_input(source_name, message)
+        if not self._performance_mode:
+            self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
         self.router.process_message(source_name, message)
 
@@ -877,7 +897,7 @@ class MidiBox:
         # Send to WiFi peers via RTP-MIDI
         if destination == "RTP-MIDI (WiFi)" and self.rtp_midi:
             ok = self.rtp_midi.send(message)
-            if ok:
+            if ok and not self._performance_mode:
                 self.midi_logger.log_output(destination, message)
             return ok
 
@@ -885,7 +905,7 @@ class MidiBox:
         if destination in ("Logic Pro", "Mac"):
             if self.gadget:
                 ok = self.gadget.send_to_host(message)
-                if ok:
+                if ok and not self._performance_mode:
                     self.midi_logger.log_output(destination, message)
                 return ok
             return False
@@ -899,7 +919,7 @@ class MidiBox:
         elif device.port_type == "hardware" and self.hw:
             ok = self.hw.send(device.name, message)
 
-        if ok:
+        if ok and not self._performance_mode:
             self.midi_logger.log_output(destination, message)
         return ok
 
@@ -915,14 +935,16 @@ class MidiBox:
         logger.info(f"MIDI Panic: All Sound Off + All Notes Off sent to {len(outputs)} output(s)")
 
     def _on_hw_midi_received(self, port_name: str, message):
-        self.midi_logger.log_input(port_name, message)
+        if not self._performance_mode:
+            self.midi_logger.log_input(port_name, message)
         self.looper.on_midi_message(port_name, message)
         self.router.process_message(port_name, message)
 
     def _on_rtpmidi_received(self, message):
         """Called from the RTP-MIDI server thread when a WiFi MIDI message arrives."""
         source_name = "RTP-MIDI (WiFi)"
-        self.midi_logger.log_input(source_name, message)
+        if not self._performance_mode:
+            self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
         self.router.process_message(source_name, message)
 

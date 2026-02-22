@@ -250,6 +250,19 @@
         <p>System configuration</p>
       </div>
 
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-header"><h3>Performance Mode</h3></div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <p style="margin:0;color:var(--text-muted);flex:1;min-width:200px;">
+            Disables all MIDI and application logging for minimum latency during live performance.
+            The MIDI Monitor and Logs pages will not update while active.
+          </p>
+          <button id="perf-mode-btn" class="btn btn-accent" onclick="togglePerformanceMode()" style="min-width:160px;">
+            Enable Performance Mode
+          </button>
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="card">
           <div class="card-header"><h3>General</h3></div>
@@ -298,6 +311,7 @@
             <div class="connect-qr-info" id="connect-url-text">—</div>
           </div>
           <div class="connect-creds">
+            <div class="connect-creds-title">Current Network</div>
             <div class="connect-row">
               <span class="connect-label">Network</span>
               <span id="connect-ssid">—</span>
@@ -310,26 +324,26 @@
               <span class="connect-label">URL</span>
               <code id="connect-url">—</code>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); margin-top:16px; line-height:1.6;">
-              Scan the WiFi QR with your iPhone camera to join the network,<br>
+            <p style="font-size:11px; color:var(--text-muted); margin-top:12px; line-height:1.6;">
+              Scan the WiFi QR with your iPhone camera to join,<br>
               then scan the URL QR to open the control interface.
             </p>
-            <form onsubmit="return saveWifi(event)" style="margin-top:16px; border-top:1px solid var(--border); padding-top:14px;">
-              <div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:10px;">Change WiFi Credentials</div>
-              <div class="connect-row">
-                <span class="connect-label">SSID</span>
-                <input type="text" id="wifi-ssid-input" maxlength="32" placeholder="Network name" style="width:160px;">
+          </div>
+
+          <div class="connect-change-form">
+            <div class="connect-creds-title">Change WiFi Credentials</div>
+            <form onsubmit="return saveWifi(event)">
+              <div class="wifi-field">
+                <label class="wifi-label">Network Name (SSID)</label>
+                <input class="wifi-input" type="text" id="wifi-ssid-input" maxlength="32" placeholder="e.g. MIDI-BOX">
               </div>
-              <div class="connect-row" style="margin-top:6px;">
-                <span class="connect-label">Password</span>
-                <input type="password" id="wifi-pass-input" minlength="8" maxlength="63" placeholder="Min 8 characters" style="width:160px;">
+              <div class="wifi-field">
+                <label class="wifi-label">Password</label>
+                <input class="wifi-input" type="password" id="wifi-pass-input" minlength="8" maxlength="63" placeholder="Min 8 characters">
               </div>
-              <div class="connect-row" style="margin-top:10px;">
-                <span class="connect-label"></span>
-                <div style="display:flex; gap:10px; align-items:center;">
-                  <button type="submit" class="btn btn-accent btn-sm">Save &amp; Apply</button>
-                  <span id="wifi-save-msg" style="font-size:11px;"></span>
-                </div>
+              <div style="display:flex; align-items:center; gap:10px; margin-top:14px;">
+                <button type="submit" class="btn btn-accent">Save &amp; Apply</button>
+                <span id="wifi-save-msg" class="wifi-save-msg"></span>
               </div>
             </form>
           </div>

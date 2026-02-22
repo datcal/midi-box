@@ -577,6 +577,29 @@ async function clearMonitor() {
 
 // --- Settings ---
 
+let _performanceModeActive = false;
+
+function _updatePerfBtn(active) {
+  _performanceModeActive = active;
+  const btn = document.getElementById('perf-mode-btn');
+  if (!btn) return;
+  if (active) {
+    btn.textContent = 'Disable Performance Mode';
+    btn.style.background = 'var(--error, #f44336)';
+  } else {
+    btn.textContent = 'Enable Performance Mode';
+    btn.style.background = '';
+  }
+}
+
+async function togglePerformanceMode() {
+  const endpoint = _performanceModeActive ? '/performance/disable' : '/performance/enable';
+  const result = await api(endpoint, { method: 'POST' });
+  if (result.ok) {
+    _updatePerfBtn(!_performanceModeActive);
+  }
+}
+
 async function loadSettings() {
   const [data, devData, netData, rtpData] = await Promise.all([
     api('/settings'),
@@ -588,6 +611,8 @@ async function loadSettings() {
   document.getElementById('setting-platform').value = data.platform;
   document.getElementById('setting-mode').value = data.mode;
   document.getElementById('setting-preset').value = data.preset || '(none)';
+
+  _updatePerfBtn(!!data.performance_mode);
 
   // Populate clock source dropdown
   const select = document.getElementById('setting-clock-source');

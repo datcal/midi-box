@@ -35,6 +35,7 @@ _DEFAULT_STATE = {
     "midi_log": [],         # recent MIDI messages (last 100)
     "midi_stats": {},
     "midi_paused": False,
+    "performance_mode": False,  # When True: all logging suppressed for lower latency
     "log_entries": [],      # Python log ring buffer (last 200)
     "launcher": {},
     "launcher_poll": {},
