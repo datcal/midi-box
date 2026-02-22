@@ -23,7 +23,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SOFTWARE_DIR="$PROJECT_DIR/software"
 VENV_DIR="$SOFTWARE_DIR/.venv"
-SERVICE_USER="${SERVICE_USER:-pi}"
+# Detect service user from project directory ownership (works for any username).
+# Can be overridden: SERVICE_USER=myuser sudo bash update.sh
+SERVICE_USER="${SERVICE_USER:-$(stat -c '%U' "$PROJECT_DIR" 2>/dev/null || echo pi)}"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
