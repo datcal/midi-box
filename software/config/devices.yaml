@@ -9,43 +9,42 @@
 # =============================================================================
 
 usb_devices:
-  # Arturia KeyLab 88 MK2
-  "1c75:0206":
-    name: "KeyLab 88 MK2"
+  # Arturia KeyLab mkII 88  (lsusb: 1c75:02cb)
+  "1c75:02cb":
+    name: "KeyLab mkII 88"
     type: controller
-    ports: 1
+    ports: 2  # MIDI port + DAW port; MIDI port is registered (DAW port skipped)
     default_channel: 0  # 0 = all channels
 
-  # Arturia KeyStep
+  # Arturia KeyStep 32  (lsusb: 1c75:0288)
   "1c75:0288":
     name: "KeyStep"
     type: controller_sequencer
     ports: 1
     default_channel: 0
 
-  # Behringer Model D
-  "1397:00d2":
-    name: "Behringer Model D"
+  # Behringer MODEL D  (lsusb: 1397:1214)
+  "1397:1214":
+    name: "MODEL D"
     type: synth
     ports: 1
     default_channel: 2
 
-  # Roland JP-08 Boutique
-  # Note: Roland USB IDs vary - check with lsusb
-  "0582:0191":
-    name: "Roland JP-08"
+  # Roland Boutique JP-08  (lsusb: 0582:01b5, ALSA name: "Boutiq")
+  "0582:01b5":
+    name: "Boutiq"
     type: synth
     ports: 1
     default_channel: 3
 
-  # Arturia MicroBrute
+  # Arturia MicroBrute  (lsusb: 1c75:0207)
   "1c75:0207":
     name: "MicroBrute"
     type: synth
     ports: 1
     default_channel: 7
 
-  # Roland SP-404 MK2
+  # Roland SP-404 MK2  (lsusb: 0582:01e5)
   "0582:01e5":
     name: "SP-404 MK2"
     type: sampler

@@ -66,8 +66,20 @@ class AlsaMidi:
             and "rtmidi" not in p.lower()
         ]
 
+        def _port_sort_key(name):
+            # Prefer standard MIDI ports over DAW/control-surface ports.
+            # This ensures the MIDI port registers first when a device exposes
+            # multiple ports (e.g. KeyLab mkII 88 MIDI vs KeyLab mkII 88 DAW).
+            lower = name.lower()
+            for kw in (" daw", " control"):
+                if kw in lower:
+                    return (1, name)
+            return (0, name)
+
+        devices = sorted(devices, key=_port_sort_key)
+
         logger.debug(f"Scan found {len(devices)} MIDI devices")
-        for d in sorted(devices):
+        for d in devices:
             directions = []
             if d in inputs:
                 directions.append("IN")
@@ -75,7 +87,7 @@ class AlsaMidi:
                 directions.append("OUT")
             logger.debug(f"  {d} [{'/'.join(directions)}]")
 
-        return sorted(devices)
+        return devices
 
     def open_port(self, port_name: str) -> AlsaPort | None:
         """Open input and/or output for a named MIDI port."""
