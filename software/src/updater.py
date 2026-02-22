@@ -173,8 +173,10 @@ def trigger_update(update_type: str) -> dict:
 
     try:
         log_fh = open(str(_UPDATE_LOG), "w")
+        # Use 'sudo bash script' instead of 'sudo script' so the execute bit and
+        # shebang line are irrelevant (avoids "command not found" on fresh clones).
         proc = subprocess.Popen(
-            ["sudo", str(_UPDATE_SCRIPT), update_type],
+            ["sudo", "bash", str(_UPDATE_SCRIPT), update_type],
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # setsid — detach from service process group
@@ -184,9 +186,26 @@ def trigger_update(update_type: str) -> dict:
             _state["update_status"] = "running"
             _state["update_pid"] = proc.pid
         logger.info("Update triggered (type=%s, pid=%d)", update_type, proc.pid)
+
+        # Monitor process in background so status returns to idle on completion/failure
+        def _monitor(p, fh):
+            p.wait()
+            try:
+                fh.close()
+            except Exception:
+                pass
+            with _state_lock:
+                _state["update_status"] = "idle"
+                _state["update_pid"] = None
+            logger.info("Update process finished (exit=%d)", p.returncode)
+
+        threading.Thread(target=_monitor, args=(proc, log_fh), daemon=True).start()
+
         return {"ok": True, "pid": proc.pid}
     except Exception as exc:
         logger.error("Failed to launch update script: %s", exc)
+        with _state_lock:
+            _state["update_status"] = "idle"
         return {"ok": False, "error": str(exc)}
 
 

@@ -1,0 +1,11 @@
+# Ensure shell scripts always use LF line endings (never CRLF).
+# Without this, git on Windows can convert \n to \r\n, breaking shebangs.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.html      text eol=lf
+*.js        text eol=lf
+*.css       text eol=lf
+*.md        text eol=lf
