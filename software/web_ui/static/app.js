@@ -843,14 +843,8 @@ function updateClockControls(clock) {
 }
 
 function _setLauncherBpmDisabled(disabled) {
-  const bpmInput = document.getElementById('launcher-bpm');
-  const bpmMinus = document.getElementById('launcher-bpm-minus');
-  const bpmPlus  = document.getElementById('launcher-bpm-plus');
-  if (bpmInput) bpmInput.disabled = disabled;
-  if (bpmMinus) bpmMinus.disabled = disabled;
-  if (bpmPlus)  bpmPlus.disabled  = disabled;
-  const bpmDiv = bpmInput?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.opacity = disabled ? '0.45' : '';
+  const bpmDiv = document.getElementById('launcher-bpm')?.closest('.clock-bpm');
+  if (bpmDiv) bpmDiv.style.display = disabled ? 'none' : '';
 }
 
 function updateBeatDisplay(poll) {
@@ -1484,19 +1478,12 @@ function _applyRecClockState(data) {
     if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
   });
 
-  // BPM — disabled when synced to launcher OR external
-  const bpmDisabled = data.clock_source === 'launcher' || data.clock_source === 'external';
+  // BPM — hide when synced to launcher OR external (sidebar shows live BPM instead)
+  const bpmHidden = data.clock_source === 'launcher' || data.clock_source === 'external';
   const bpmInput = document.getElementById('rec-bpm');
-  const bpmMinus = document.getElementById('rec-bpm-minus');
-  const bpmPlus  = document.getElementById('rec-bpm-plus');
-  if (bpmInput) {
-    bpmInput.value = Math.round(data.bpm || 120);
-    bpmInput.disabled = bpmDisabled;
-  }
-  if (bpmMinus) bpmMinus.disabled = bpmDisabled;
-  if (bpmPlus)  bpmPlus.disabled  = bpmDisabled;
+  if (bpmInput && !bpmHidden) bpmInput.value = Math.round(data.bpm || 120);
   const bpmDiv = bpmInput?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.opacity = bpmDisabled ? '0.45' : '';
+  if (bpmDiv) bpmDiv.style.display = bpmHidden ? 'none' : '';
 
   // Clock source context panel
   const _cspConfig = {
