@@ -582,13 +582,22 @@ let _performanceModeActive = false;
 function _updatePerfBtn(active) {
   _performanceModeActive = active;
   const btn = document.getElementById('perf-mode-btn');
-  if (!btn) return;
-  if (active) {
-    btn.textContent = 'Disable Performance Mode';
-    btn.style.background = 'var(--error, #f44336)';
-  } else {
-    btn.textContent = 'Enable Performance Mode';
-    btn.style.background = '';
+  if (btn) {
+    if (active) {
+      btn.textContent = 'Disable Performance Mode';
+      btn.style.background = 'var(--error, #f44336)';
+    } else {
+      btn.textContent = 'Enable Performance Mode';
+      btn.style.background = '';
+    }
+  }
+  // Show/hide nav items that are noisy in performance mode
+  document.querySelectorAll('.perf-hide').forEach(el => {
+    el.style.display = active ? 'none' : '';
+  });
+  // If currently on a hidden page, go to dashboard
+  if (active && ['monitor', 'player', 'logs'].includes(currentPage)) {
+    navigateTo('dashboard');
   }
 }
 
