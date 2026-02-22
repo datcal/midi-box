@@ -13,3 +13,4 @@ pyserial>=3.5
 # Pi-only (install manually on Raspberry Pi)
 # RPi.GPIO>=0.7
 # smbus2>=0.4
+# gpiozero>=1.6      # foot pedal GPIO (pre-installed on Pi OS, or: pip install gpiozero)

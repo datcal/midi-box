@@ -1,3 +1,7 @@
+gpio_pedal:
+  debounce_ms: 50
+  pin: 17
+  pull_up: true
 gadget:
   auto_detect_mode: true
   enabled: true

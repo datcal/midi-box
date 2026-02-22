@@ -29,6 +29,8 @@ from preset_manager import PresetManager
 from midi_logger import MidiLogger
 from midi_player import MidiPlayer
 from midi_looper import MidiLooper
+from quick_recorder import QuickRecorder
+from gpio_pedal import GpioPedal
 from rtpmidi import RtpMidiServer
 from clip_launcher import ClipLauncher
 from state import StateManager
@@ -94,6 +96,8 @@ class MidiBox:
         self.bridge = None
         self._performance_mode = False
         self._verbose = getattr(args, "verbose", False)
+        self.recorder = QuickRecorder(recordings_dir="data/recordings")
+        self.gpio_pedal = None
 
     def start(self):
         self.log_buffer.install()
@@ -120,6 +124,7 @@ class MidiBox:
         self.player._send_callback  = self._send_midi
         self.looper._send_callback  = self._send_midi
         self.launcher._send_callback = self._send_midi
+        self.recorder._router_callback = self.router.process_message
         self.launcher._output_devices_callback = self._get_output_device_names
         self.router._clock_callback = self.launcher.on_clock_message
 
@@ -166,6 +171,24 @@ class MidiBox:
         # Start RTP-MIDI server (Apple MIDI over WiFi)
         self._init_rtpmidi()
 
+        # GPIO foot pedal (Pi only)
+        if self.platform == "pi":
+            try:
+                import yaml
+                from pathlib import Path
+                _cfg_path = Path(__file__).resolve().parent.parent / "config" / "midi_box.yaml"
+                with open(_cfg_path) as _f:
+                    _yaml = yaml.safe_load(_f) or {}
+                gpio_cfg = _yaml.get("gpio_pedal", {})
+            except Exception:
+                gpio_cfg = {}
+            self.gpio_pedal = GpioPedal(
+                pin=gpio_cfg.get("pin", 17),
+                pull_up=gpio_cfg.get("pull_up", True),
+                debounce_ms=gpio_cfg.get("debounce_ms", 50),
+                callback=self._on_pedal_press,
+            )
+
         # Main loop
         self._running = True
         logger.info("Routing engine running. Press Ctrl+C to stop.")
@@ -177,6 +200,9 @@ class MidiBox:
         logger.info("Shutting down...")
         self.player.stop()
         self.looper.close()
+        self.recorder.close()
+        if self.gpio_pedal:
+            self.gpio_pedal.close()
         self.launcher.stop()
         if self.rtp_midi:
             self.rtp_midi.stop()
@@ -586,6 +612,28 @@ class MidiBox:
             logger.info("Performance mode OFF — logging resumed")
             return {"ok": True}
 
+        # --- Quick Recorder ---
+        elif action == "recorder.toggle":
+            return self.recorder.toggle()
+        elif action == "recorder.play":
+            return self.recorder.play()
+        elif action == "recorder.stop":
+            return self.recorder.stop()
+        elif action == "recorder.clear":
+            return self.recorder.clear()
+        elif action == "recorder.auto_play":
+            self.recorder.set_auto_play(params.get("value", True))
+            return {"ok": True}
+        elif action == "recorder.save":
+            return self.recorder.save(params.get("name"))
+        elif action == "recorder.delete":
+            return self.recorder.delete_recording(params.get("name", ""))
+        elif action == "recorder.list":
+            return {"ok": True, "recordings": self.recorder.list_recordings()}
+        elif action == "recorder.get_path":
+            path = self.recorder.get_recording_path(params.get("name", ""))
+            return {"ok": path is not None, "path": path}
+
         # --- Launcher ---
         elif action == "launcher.clock":
             if "mode" in params:
@@ -812,6 +860,9 @@ class MidiBox:
         self.bridge.state["current_preset"] = self.presets.current_preset or "default"
         self.bridge.state["clock_source"] = self.router._clock_source
 
+        # Quick recorder state
+        self.bridge.state["recorder"] = self.recorder.get_status()
+
         # MIDI log + Python app log — skipped in performance mode to reduce IPC overhead
         self.bridge.state["performance_mode"] = self._performance_mode
         if not self._performance_mode:
@@ -860,6 +911,7 @@ class MidiBox:
         if not self._performance_mode:
             self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
+        self.recorder.on_midi_message(source_name, message)
         self.router.process_message(source_name, message)
 
     def _set_realtime_priority(self):
@@ -938,6 +990,7 @@ class MidiBox:
         if not self._performance_mode:
             self.midi_logger.log_input(port_name, message)
         self.looper.on_midi_message(port_name, message)
+        self.recorder.on_midi_message(port_name, message)
         self.router.process_message(port_name, message)
 
     def _on_rtpmidi_received(self, message):
@@ -946,7 +999,13 @@ class MidiBox:
         if not self._performance_mode:
             self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
+        self.recorder.on_midi_message(source_name, message)
         self.router.process_message(source_name, message)
+
+    def _on_pedal_press(self):
+        """Called from GPIO interrupt thread when foot pedal is pressed."""
+        result = self.recorder.toggle()
+        logger.info(f"Pedal press → recorder {result.get('state')}")
 
     def _on_usb_device_connected(self, port_name: str, port):
         device = self.registry.register_usb_device(port.port_name, port_name)

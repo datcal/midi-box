@@ -42,7 +42,7 @@ function loadPageData(page) {
     case 'launcher': loadLauncher(); break;
     case 'presets': loadPresets(); break;
     case 'monitor': startMonitor(); break;
-    case 'looper': loadLooper(); break;
+    case 'recorder': loadRecorder(); break;
     case 'player': loadPlayer(); break;
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
@@ -1304,144 +1304,188 @@ function fmtUptime(seconds) {
   return parts.join(' ');
 }
 
-// --- MIDI Looper ---
+// --- Quick Recorder ---
 
-let looperInterval = null;
+let recInterval     = null;
+let recElapsedTimer = null;
+let recState        = 'idle';
+let recElapsedSecs  = 0;
 
-async function loadLooper() {
-  const [looperData, devData] = await Promise.all([
-    api('/looper'),
-    api('/devices'),
-  ]);
-  renderLooperSlots(looperData.slots, devData.devices);
-
-  if (looperInterval) clearInterval(looperInterval);
-  looperInterval = setInterval(pollLooper, 500);
+async function loadRecorder() {
+  const data = await api('/recorder');
+  _applyRecorderState(data);
+  loadRecordings();
+  if (recInterval) clearInterval(recInterval);
+  recInterval = setInterval(pollRecorder, 400);
 }
 
-async function pollLooper() {
-  if (currentPage !== 'looper') {
-    clearInterval(looperInterval);
-    looperInterval = null;
+async function pollRecorder() {
+  if (currentPage !== 'recorder') {
+    clearInterval(recInterval);
+    recInterval = null;
+    _clearRecElapsedTimer();
     return;
   }
-  const data = await api('/looper');
-  updateLooperStates(data.slots);
+  const data = await api('/recorder');
+  _applyRecorderState(data);
 }
 
-function updateLooperStates(slots) {
-  if (!slots) return;
-  slots.forEach(s => {
-    const stateEl = document.getElementById(`loop-state-${s.slot_id}`);
-    const lenEl   = document.getElementById(`loop-len-${s.slot_id}`);
-    if (stateEl) stateEl.textContent = s.state.toUpperCase();
-    if (stateEl) stateEl.className   = `loop-state loop-state-${s.state}`;
-    if (lenEl)   lenEl.textContent   = s.length > 0 ? s.length.toFixed(2) + 's' : '';
-    // Update button labels based on state
-    const recBtn = document.getElementById(`loop-rec-${s.slot_id}`);
-    if (recBtn) {
-      if (s.state === 'recording')    recBtn.textContent = '⬛ STOP REC';
-      else if (s.state === 'overdubbing') recBtn.textContent = '⬛ STOP OD';
-      else                            recBtn.textContent = '⏺ REC';
-      recBtn.classList.toggle('btn-recording', s.state === 'recording' || s.state === 'overdubbing');
+function _applyRecorderState(data) {
+  if (!data || !data.state) return;
+  const prev  = recState;
+  recState    = data.state;
+
+  // Elapsed timer management
+  if (recState === 'recording' && prev !== 'recording') {
+    recElapsedSecs = 0;
+    _clearRecElapsedTimer();
+    recElapsedTimer = setInterval(() => {
+      recElapsedSecs++;
+      const el = document.getElementById('rec-elapsed');
+      if (el) el.textContent = _fmtSecs(recElapsedSecs);
+    }, 1000);
+  } else if (recState !== 'recording') {
+    _clearRecElapsedTimer();
+    const el = document.getElementById('rec-elapsed');
+    if (el) el.textContent = data.length > 0 ? _fmtSecs(data.length) : '';
+  }
+
+  // Badge
+  const badge = document.getElementById('rec-status-badge');
+  if (badge) {
+    const labels = {idle:'IDLE', recording:'● REC', playing:'▶ PLAYING', stopped:'STOPPED'};
+    badge.textContent = labels[recState] || recState.toUpperCase();
+    badge.className   = 'rec-state-badge ' + recState;
+  }
+
+  // Toggle button
+  const toggleBtn = document.getElementById('rec-toggle-btn');
+  if (toggleBtn) {
+    toggleBtn.textContent = recState === 'recording' ? '⏹ Stop Recording' : '⏺ RECORD';
+    toggleBtn.className   = recState === 'recording'
+      ? 'btn btn-danger' : 'btn btn-accent';
+  }
+
+  // Other buttons
+  const stopBtn  = document.getElementById('rec-stop-btn');
+  const playBtn  = document.getElementById('rec-play-btn');
+  const clearBtn = document.getElementById('rec-clear-btn');
+  if (stopBtn)  stopBtn.disabled  = recState === 'idle';
+  if (playBtn)  playBtn.disabled  = recState !== 'stopped' || !data.event_count;
+  if (clearBtn) clearBtn.disabled = recState === 'idle';
+
+  // Auto-play toggle
+  const apToggle = document.getElementById('rec-auto-play');
+  if (apToggle && apToggle.checked !== !!data.auto_play) {
+    apToggle.checked = !!data.auto_play;
+  }
+
+  // Stats
+  const stats = document.getElementById('rec-stats');
+  if (stats) {
+    if (data.event_count > 0) {
+      stats.textContent = `${data.event_count} events  ·  loop: ${data.length.toFixed(2)}s`;
+    } else {
+      stats.textContent = '';
     }
-    const stopBtn = document.getElementById(`loop-stop-${s.slot_id}`);
-    if (stopBtn) stopBtn.disabled = s.state === 'empty';
-  });
+  }
+
+  // Save card visibility
+  const saveCard = document.getElementById('rec-save-card');
+  if (saveCard) {
+    saveCard.style.display = (recState === 'stopped' || recState === 'playing') && data.event_count
+      ? '' : 'none';
+  }
+
+  // Note feed
+  if (data.recent_events) {
+    renderNoteFeed(data.recent_events);
+  }
 }
 
-function renderLooperSlots(slots, devices) {
-  const container = document.getElementById('looper-slots');
-  if (!slots) return;
+function _clearRecElapsedTimer() {
+  if (recElapsedTimer) {
+    clearInterval(recElapsedTimer);
+    recElapsedTimer = null;
+  }
+}
 
-  const inputs  = devices.filter(d => d.direction === 'both' || d.direction === 'in');
-  const outputs = devices.filter(d => d.direction === 'both' || d.direction === 'out');
+function _fmtSecs(s) {
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed ? (s % 60).toFixed(0).padStart(2, '0') : String(Math.floor(s % 60)).padStart(2, '0');
+  return `${m}:${sec}`;
+}
 
-  const srcOpts = inputs.map(d  => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
-  const dstOpts = outputs.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');
-  const chOpts  = '<option value="0">All channels</option>' +
-    Array.from({length: 16}, (_, i) => `<option value="${i+1}">Channel ${i+1}</option>`).join('');
+function renderNoteFeed(events) {
+  const el = document.getElementById('rec-note-feed');
+  if (!el) return;
+  const rows = events.filter(e => e.type === 'note_on' || e.type === 'note_off');
+  if (!rows.length) return;
+  el.innerHTML = rows.map(e => {
+    const t   = e.offset.toFixed(2).padStart(6, ' ');
+    const src = esc(e.source || '');
+    const note = esc(e.note || '');
+    const vel  = e.velocity !== undefined ? e.velocity : '';
+    const ch   = e.channel  !== undefined ? 'ch' + e.channel : '';
+    const dim  = e.type === 'note_off' ? 'opacity:0.45;' : '';
+    return `<div class="rec-note-row" style="${dim}">
+      <span class="r-time">${t}s</span>
+      <span class="r-src">${src}</span>
+      <span class="r-note">${note}</span>
+      <span class="r-vel">${vel !== '' ? 'v:' + vel : ''}</span>
+      <span class="r-ch">${ch}</span>
+    </div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
 
-  container.innerHTML = slots.map(s => `
-    <div class="card loop-card" style="margin-bottom:8px;">
-      <div class="loop-header">
-        <span class="loop-title">LOOP ${s.slot_id + 1}</span>
-        <span id="loop-state-${s.slot_id}" class="loop-state loop-state-${s.state}">${s.state.toUpperCase()}</span>
-        <span id="loop-len-${s.slot_id}" class="loop-len">${s.length > 0 ? s.length.toFixed(2) + 's' : ''}</span>
-        <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">${s.event_count} events</span>
+async function recToggle()               { await api('/recorder/toggle',    { method: 'POST' }); }
+async function recPlay()                 { await api('/recorder/play',      { method: 'POST' }); }
+async function recStop()                 { await api('/recorder/stop',      { method: 'POST' }); }
+async function recClear()                { await api('/recorder/clear',     { method: 'POST' }); }
+async function recSetAutoPlay(val)       { await api('/recorder/auto_play', { method: 'POST', body: { value: val } }); }
+
+async function recSave() {
+  const name = document.getElementById('rec-save-name')?.value.trim() || null;
+  const msg  = document.getElementById('rec-save-msg');
+  if (msg) { msg.textContent = 'Saving…'; msg.style.color = 'var(--text-muted)'; }
+  const result = await api('/recorder/save', { method: 'POST', body: { name } });
+  if (result.ok) {
+    if (msg) { msg.textContent = `Saved: ${result.name}.mid`; msg.style.color = 'var(--success,#2ecc71)'; }
+    loadRecordings();
+  } else {
+    if (msg) { msg.textContent = result.error || 'Save failed'; msg.style.color = 'var(--error,#f44336)'; }
+  }
+}
+
+async function loadRecordings() {
+  const result = await api('/recorder/recordings');
+  const list = document.getElementById('rec-recordings-list');
+  if (!list) return;
+  const recordings = result.recordings || [];
+  if (!recordings.length) {
+    list.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px;">No recordings yet.</div>';
+    return;
+  }
+  list.innerHTML = recordings.map(r => `
+    <div class="rec-recording-row">
+      <div class="rec-recording-info">
+        <div class="rec-recording-name">${esc(r.name)}</div>
+        <div class="rec-recording-meta">${r.created_at || ''} &nbsp;·&nbsp; ${r.length_sec || 0}s &nbsp;·&nbsp; ${r.event_count || 0} events</div>
       </div>
-      <div class="loop-config">
-        <div class="loop-config-row">
-          <span class="loop-label">Source</span>
-          <select id="loop-src-${s.slot_id}" class="loop-select"
-                  onchange="looperConfigure(${s.slot_id})">
-            <option value="">— select —</option>
-            ${srcOpts}
-          </select>
-        </div>
-        <div class="loop-config-row">
-          <span class="loop-label">→ Dest</span>
-          <select id="loop-dst-${s.slot_id}" class="loop-select"
-                  onchange="looperConfigure(${s.slot_id})">
-            <option value="">— select —</option>
-            ${dstOpts}
-          </select>
-        </div>
-        <div class="loop-config-row">
-          <span class="loop-label">Ch</span>
-          <select id="loop-ch-${s.slot_id}" class="loop-select loop-select-ch"
-                  onchange="looperConfigure(${s.slot_id})">
-            ${chOpts}
-          </select>
-        </div>
-      </div>
-      <div class="loop-controls">
-        <button id="loop-rec-${s.slot_id}"
-                class="btn btn-accent loop-rec-btn"
-                onclick="looperRecord(${s.slot_id})">⏺ REC</button>
-        <button id="loop-stop-${s.slot_id}"
-                class="btn loop-stop-btn"
-                onclick="looperStop(${s.slot_id})"
-                ${s.state === 'empty' ? 'disabled' : ''}>⏹ STOP</button>
-        <button class="btn btn-danger loop-clear-btn"
-                onclick="looperClear(${s.slot_id})">✕ CLEAR</button>
+      <div class="rec-recording-actions">
+        <a class="btn btn-sm btn-accent" href="/api/recorder/recordings/${encodeURIComponent(r.name)}"
+           download="${esc(r.name)}.mid">&#8659; .mid</a>
+        <button class="btn btn-sm btn-danger" onclick="recDelete('${esc(r.name)}')">&#10005;</button>
       </div>
     </div>
   `).join('');
-
-  // Restore current selections
-  slots.forEach(s => {
-    const srcEl = document.getElementById(`loop-src-${s.slot_id}`);
-    const dstEl = document.getElementById(`loop-dst-${s.slot_id}`);
-    const chEl  = document.getElementById(`loop-ch-${s.slot_id}`);
-    if (srcEl && s.source)      srcEl.value = s.source;
-    if (dstEl && s.destination) dstEl.value = s.destination;
-    if (chEl  && s.midi_channel) chEl.value = s.midi_channel;
-  });
-
-  updateLooperStates(slots);
 }
 
-async function looperConfigure(slotId) {
-  const src = document.getElementById(`loop-src-${slotId}`)?.value || '';
-  const dst = document.getElementById(`loop-dst-${slotId}`)?.value || '';
-  const ch  = parseInt(document.getElementById(`loop-ch-${slotId}`)?.value) || 0;
-  await api(`/looper/${slotId}/configure`, {
-    method: 'POST',
-    body: { source: src, destination: dst, midi_channel: ch || null },
-  });
-}
-
-async function looperRecord(slotId) {
-  await api(`/looper/${slotId}/record`, { method: 'POST' });
-}
-
-async function looperStop(slotId) {
-  await api(`/looper/${slotId}/stop`, { method: 'POST' });
-}
-
-async function looperClear(slotId) {
-  await api(`/looper/${slotId}/clear`, { method: 'POST' });
+async function recDelete(name) {
+  if (!confirm(`Delete recording "${name}"?`)) return;
+  await api(`/recorder/recordings/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  loadRecordings();
 }
 
 // --- MIDI Panic (silence all notes) ---

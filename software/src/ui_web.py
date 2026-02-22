@@ -29,7 +29,7 @@ import logging
 import threading
 from pathlib import Path
 
-from flask import Flask, render_template, jsonify, request, Response
+from flask import Flask, render_template, jsonify, request, Response, send_file
 
 logger = logging.getLogger("midi-box.web")
 
@@ -729,6 +729,55 @@ def create_app(bridge):
     @app.route("/api/looper/<int:slot_id>/clear", methods=["POST"])
     def api_looper_clear(slot_id):
         return jsonify(_cmd("looper.clear", {"slot_id": slot_id}))
+
+    # ---------------------------------------------------------------
+    # API: Quick Recorder
+    # ---------------------------------------------------------------
+
+    @app.route("/api/recorder")
+    def api_recorder():
+        return jsonify(dict(_state().get("recorder", {})))
+
+    @app.route("/api/recorder/toggle", methods=["POST"])
+    def api_recorder_toggle():
+        return jsonify(_cmd("recorder.toggle"))
+
+    @app.route("/api/recorder/play", methods=["POST"])
+    def api_recorder_play():
+        return jsonify(_cmd("recorder.play"))
+
+    @app.route("/api/recorder/stop", methods=["POST"])
+    def api_recorder_stop():
+        return jsonify(_cmd("recorder.stop"))
+
+    @app.route("/api/recorder/clear", methods=["POST"])
+    def api_recorder_clear():
+        return jsonify(_cmd("recorder.clear"))
+
+    @app.route("/api/recorder/auto_play", methods=["POST"])
+    def api_recorder_auto_play():
+        value = (request.json or {}).get("value", True)
+        return jsonify(_cmd("recorder.auto_play", {"value": value}))
+
+    @app.route("/api/recorder/save", methods=["POST"])
+    def api_recorder_save():
+        name = (request.json or {}).get("name") or None
+        return jsonify(_cmd("recorder.save", {"name": name}))
+
+    @app.route("/api/recorder/recordings")
+    def api_recorder_recordings():
+        return jsonify(_cmd("recorder.list"))
+
+    @app.route("/api/recorder/recordings/<name>", methods=["GET", "DELETE"])
+    def api_recorder_recording(name):
+        if request.method == "DELETE":
+            return jsonify(_cmd("recorder.delete", {"name": name}))
+        # GET — download .mid file
+        path = _cmd("recorder.get_path", {"name": name}).get("path")
+        if not path:
+            return jsonify({"ok": False, "error": "Not found"}), 404
+        return send_file(path, as_attachment=True, download_name=name + ".mid",
+                         mimetype="audio/midi")
 
     @app.route("/api/system/restart", methods=["POST"])
     def api_system_restart():

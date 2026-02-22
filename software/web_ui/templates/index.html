@@ -34,8 +34,8 @@
       <li><a href="#settings" data-page="settings">
         <span class="nav-icon">&#9881;</span><span>Settings</span>
       </a></li>
-      <li><a href="#looper" data-page="looper">
-        <span class="nav-icon">&#9711;</span><span>Looper</span>
+      <li><a href="#recorder" data-page="recorder">
+        <span class="nav-icon">&#9210;</span><span>Record</span>
       </a></li>
       <li><a href="#player" data-page="player">
         <span class="nav-icon">&#9654;</span><span>Player</span>
@@ -438,13 +438,67 @@
       </div>
     </div>
 
-    <!-- ============== LOOPER ============== -->
-    <div class="page" id="page-looper">
+    <!-- ============== RECORDER ============== -->
+    <div class="page" id="page-recorder">
       <div class="page-header">
-        <h2>MIDI Looper</h2>
-        <p>Record and loop MIDI in real-time — tap REC to record, tap again to loop</p>
+        <h2>Quick Recorder</h2>
+        <p>Record live MIDI from all inputs — press REC or foot pedal to start / stop</p>
       </div>
-      <div id="looper-slots"></div>
+
+      <!-- Transport card -->
+      <div class="card">
+        <div class="card-header">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="rec-state-badge" id="rec-status-badge">IDLE</span>
+            <span id="rec-elapsed" style="font-size:13px;color:var(--text-secondary);min-width:60px;"></span>
+          </div>
+          <label class="exclusive-label" style="gap:8px;">
+            <input type="checkbox" id="rec-auto-play" checked onchange="recSetAutoPlay(this.checked)">
+            <span class="exclusive-switch"></span>
+            <span>Auto-play after recording</span>
+          </label>
+        </div>
+        <div class="btn-group" style="flex-wrap:wrap;gap:8px;">
+          <button id="rec-toggle-btn" class="btn btn-accent" onclick="recToggle()" style="min-width:140px;">&#9210; RECORD</button>
+          <button id="rec-stop-btn"   class="btn" onclick="recStop()"   disabled>&#9632; Stop</button>
+          <button id="rec-play-btn"   class="btn" onclick="recPlay()"   disabled>&#9654; Play</button>
+          <button id="rec-clear-btn"  class="btn btn-danger" onclick="recClear()" disabled>&#10005; Clear</button>
+        </div>
+        <div id="rec-stats" style="margin-top:10px;font-size:11px;color:var(--text-muted);"></div>
+      </div>
+
+      <!-- Live note feed -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Live Note Feed</h3>
+          <span style="font-size:11px;color:var(--text-muted);">Hardware inputs only — MIDI player excluded</span>
+        </div>
+        <div class="rec-note-feed" id="rec-note-feed">
+          <div style="color:var(--text-muted);font-size:12px;padding:12px;">Press RECORD to start capturing…</div>
+        </div>
+      </div>
+
+      <!-- Save recording -->
+      <div class="card" id="rec-save-card" style="display:none;">
+        <div class="card-header"><h3>Save Recording</h3></div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <input type="text" id="rec-save-name" class="wifi-input" style="max-width:260px;"
+                 placeholder="Name (auto if blank)">
+          <button class="btn btn-accent" onclick="recSave()">&#128190; Save as .mid</button>
+          <span id="rec-save-msg" class="wifi-save-msg"></span>
+        </div>
+      </div>
+
+      <!-- Saved recordings list -->
+      <div class="card">
+        <div class="card-header">
+          <h3>Saved Recordings</h3>
+          <button class="btn btn-sm" onclick="loadRecordings()">&#8635; Refresh</button>
+        </div>
+        <div id="rec-recordings-list">
+          <div style="color:var(--text-muted);font-size:12px;padding:8px;">No recordings yet.</div>
+        </div>
+      </div>
     </div>
 
     <!-- ============== LOGS ============== -->

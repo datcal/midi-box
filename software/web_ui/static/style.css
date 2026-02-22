@@ -1172,6 +1172,90 @@ body {
   margin-top: 16px;
 }
 
+/* --- Quick Recorder --- */
+
+.rec-state-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.rec-state-badge.recording {
+  background: rgba(231, 76, 60, 0.2);
+  color: var(--danger);
+  border-color: var(--danger);
+  animation: rec-blink 1s step-end infinite;
+}
+
+.rec-state-badge.playing {
+  background: rgba(15, 155, 142, 0.2);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.rec-state-badge.stopped {
+  background: rgba(243, 156, 18, 0.15);
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+@keyframes rec-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.rec-note-feed {
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 0;
+}
+
+.rec-note-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 48px 64px 40px;
+  gap: 8px;
+  padding: 3px 12px;
+  border-bottom: 1px solid rgba(42, 58, 92, 0.3);
+  align-items: center;
+}
+
+.rec-note-row:last-child { border-bottom: none; }
+
+.rec-note-row .r-time  { color: var(--text-muted); }
+.rec-note-row .r-src   { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rec-note-row .r-note  { color: var(--success); font-weight: 700; }
+.rec-note-row .r-vel   { color: var(--text-muted); }
+.rec-note-row .r-ch    { color: var(--accent); }
+
+.rec-recording-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  gap: 12px;
+}
+
+.rec-recording-row:last-child { border-bottom: none; }
+
+.rec-recording-info { flex: 1; }
+.rec-recording-name { font-weight: 600; color: var(--text-primary); }
+.rec-recording-meta { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.rec-recording-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
 /* --- Responsive --- */
 
 @media (max-width: 768px) {
