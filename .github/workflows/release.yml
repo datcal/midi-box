@@ -1,0 +1,155 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Skip the commit the workflow itself makes (prevents infinite loop)
+    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+
+    permissions:
+      contents: write  # needed to push the VERSION commit, create tags, and create releases
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so we can inspect all commits since last tag
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 1. Find the latest tag (falls back to v0.0.0 if none exist yet)
+      # -----------------------------------------------------------------------
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          git fetch --tags --force
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST"
+
+      # -----------------------------------------------------------------------
+      # 2. Read commits since the last tag and decide the bump type
+      #
+      # Rules (conventional commits):
+      #   feat!:  / BREAKING CHANGE  →  major  (x.0.0)
+      #   feat:                      →  minor  (0.x.0)
+      #   fix: / anything else       →  patch  (0.0.x)
+      # -----------------------------------------------------------------------
+      - name: Determine version bump
+        id: bump
+        run: |
+          LATEST="${{ steps.latest_tag.outputs.tag }}"
+
+          if [ "$LATEST" = "v0.0.0" ]; then
+            COMMITS=$(git log --pretty=format:"%s%n%b")
+          else
+            COMMITS=$(git log "${LATEST}..HEAD" --pretty=format:"%s%n%b")
+          fi
+
+          BUMP="patch"
+
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            if echo "$line" | grep -qE "^[a-z]+(\(.+\))?!:" || echo "$line" | grep -qiE "^BREAKING CHANGE"; then
+              BUMP="major"
+              break
+            fi
+            if [ "$BUMP" != "major" ] && echo "$line" | grep -qE "^feat(\(.+\))?:"; then
+              BUMP="minor"
+            fi
+          done <<< "$COMMITS"
+
+          echo "bump=$BUMP" >> $GITHUB_OUTPUT
+          echo "Version bump: $BUMP"
+
+      # -----------------------------------------------------------------------
+      # 3. Calculate the new version number
+      # -----------------------------------------------------------------------
+      - name: Calculate new version
+        id: version
+        run: |
+          LATEST="${{ steps.latest_tag.outputs.tag }}"
+          BUMP="${{ steps.bump.outputs.bump }}"
+
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          case "$BUMP" in
+            major) NEW="$((MAJOR + 1)).0.0" ;;
+            minor) NEW="${MAJOR}.$((MINOR + 1)).0" ;;
+            patch) NEW="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+          esac
+
+          echo "version=v${NEW}" >> $GITHUB_OUTPUT
+          echo "New version: v${NEW}"
+
+      # -----------------------------------------------------------------------
+      # 4. Build release notes grouped by commit type
+      # -----------------------------------------------------------------------
+      - name: Build release notes
+        id: notes
+        run: |
+          LATEST="${{ steps.latest_tag.outputs.tag }}"
+
+          if [ "$LATEST" = "v0.0.0" ]; then
+            LOG=$(git log --pretty=format:"%s" | head -50)
+          else
+            LOG=$(git log "${LATEST}..HEAD" --pretty=format:"%s")
+          fi
+
+          FEATURES=""
+          FIXES=""
+          OTHER=""
+
+          while IFS= read -r msg; do
+            [ -z "$msg" ] && continue
+            if echo "$msg" | grep -qE "^feat(\(.+\))?!?:"; then
+              FEATURES="${FEATURES}\n- ${msg}"
+            elif echo "$msg" | grep -qE "^fix(\(.+\))?:"; then
+              FIXES="${FIXES}\n- ${msg}"
+            elif echo "$msg" | grep -qE "^chore: bump version"; then
+              : # skip the bot's own version bump commits
+            else
+              OTHER="${OTHER}\n- ${msg}"
+            fi
+          done <<< "$LOG"
+
+          {
+            echo "notes<<ENDOFNOTES"
+            [ -n "$FEATURES" ] && printf "### New Features\n${FEATURES}\n\n"
+            [ -n "$FIXES" ]    && printf "### Bug Fixes\n${FIXES}\n\n"
+            [ -n "$OTHER" ]    && printf "### Other Changes\n${OTHER}\n"
+            echo "ENDOFNOTES"
+          } >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # 5. Commit updated VERSION file, tag it, push, create the release
+      # -----------------------------------------------------------------------
+      - name: Commit VERSION, tag, and push
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$NEW_VERSION" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git push origin main
+          git tag "$NEW_VERSION"
+          git push origin "$NEW_VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          gh release create "$NEW_VERSION" \
+            --title "Release $NEW_VERSION" \
+            --notes "$NOTES"
