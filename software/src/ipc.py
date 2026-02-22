@@ -6,7 +6,7 @@ The Flask web process is a pure consumer: reads from shared state,
 sends commands via queue, and waits for results.
 
 Communication:
-  shared_state : Manager().dict()  — MIDI writes, Flask reads (updated ~5×/sec)
+  shared_state : Manager().dict()  — MIDI writes, Flask reads (updated ~10×/sec)
   cmd_queue    : Manager().Queue() — Flask sends commands, MIDI processes
   results      : Manager().dict()  — MIDI writes results, Flask polls/removes
 """
@@ -19,7 +19,7 @@ from multiprocessing import Manager
 logger = logging.getLogger("midi-box.ipc")
 
 # How often (seconds) the MIDI process pushes state to the shared dict.
-STATE_UPDATE_INTERVAL = 0.2
+STATE_UPDATE_INTERVAL = 0.1
 
 # Command wait timeout (seconds).
 COMMAND_TIMEOUT = 5.0

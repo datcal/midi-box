@@ -578,10 +578,14 @@ def create_app(bridge):
     def api_poll():
         """Lightweight endpoint for UI polling — returns activity + stats."""
         st = _state()
+        launcher_poll = st.get("launcher_poll", {})
         return jsonify({
             "devices": list(st.get("activity", [])),
             "mode": st.get("mode", "standalone"),
             "preset": st.get("current_preset", "default"),
+            "bpm": launcher_poll.get("bpm", 120),
+            "clock_mode": st.get("launcher", {}).get("clock", {}).get("mode", "internal"),
+            "ext_bpm": launcher_poll.get("ext_bpm"),
         })
 
     # ---------------------------------------------------------------

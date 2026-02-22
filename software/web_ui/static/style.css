@@ -69,10 +69,57 @@ body {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  background: var(--accent-dim);
-  color: var(--accent);
+  background: var(--danger-dim);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  letter-spacing: 0.5px;
+}
+
+/* Live status row — BPM + clock mode, always visible in sidebar */
+.sidebar-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+  animation: livePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+.live-clock-mode {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.live-bpm {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+
+.live-bpm small {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 1px;
 }
 
 .sidebar-nav {
@@ -1445,6 +1492,7 @@ body {
   .sidebar-header h1::first-letter { font-size: 18px; }
   .sidebar-nav li a span:not(.nav-icon) { display: none; }
   .sidebar-header .mode-badge { display: none; }
+  .sidebar-live { display: none; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .device-list { grid-template-columns: 1fr; }
 

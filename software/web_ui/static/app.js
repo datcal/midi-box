@@ -1826,14 +1826,31 @@ async function panicRestart() {
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(async () => {
-    if (currentPage !== 'dashboard') return;
-    // Use the lightweight /api/poll endpoint — only updates activity dots,
-    // never re-renders the whole device list (that happens on page load only).
     try {
       const data = await api('/poll');
-      updateDashboardActivity(data);
+      updateSidebarLive(data);
+      if (currentPage === 'dashboard') updateDashboardActivity(data);
     } catch (_) { /* ignore transient failures */ }
   }, 2000);
+}
+
+function updateSidebarLive(data) {
+  // Mode badge (STANDALONE / DAW / etc.)
+  const badge = document.getElementById('mode-badge');
+  if (badge && data.mode) badge.textContent = data.mode;
+
+  // Clock mode label (INT / EXT)
+  const clockMode = document.getElementById('sidebar-clock-mode');
+  if (clockMode) clockMode.textContent = data.clock_mode === 'external' ? 'EXT' : 'INT';
+
+  // BPM — show detected ext BPM when in external mode, otherwise show set BPM
+  const bpmEl = document.getElementById('sidebar-bpm');
+  if (bpmEl) {
+    const bpm = data.clock_mode === 'external' && data.ext_bpm
+      ? data.ext_bpm
+      : Math.round(data.bpm || 120);
+    bpmEl.innerHTML = `${bpm} <small>BPM</small>`;
+  }
 }
 
 // --- Software Update ---
