@@ -19,7 +19,14 @@ The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 │  │ Web UI   │  │  Clip Launcher   │  │  MIDI Player   │ │
 │  │ (Flask)  │  │  (clip_launcher) │  │  (midi_player) │ │
 │  └────┬─────┘  └────────┬─────────┘  └───────┬────────┘ │
-│       └─────────────────┴─────────────────────┘          │
+│       │        ┌────────┴─────────┐           │          │
+│       │        │  Tick Subscribers │           │          │
+│       │        │  ┌─────────────┐ │           │          │
+│       │        │  │ Recorder    │ │           │          │
+│       │        │  │ Looper      │ │           │          │
+│       │        │  └─────────────┘ │           │          │
+│       │        └──────────────────┘           │          │
+│       └─────────────────┬─────────────────────┘          │
 │                          │                               │
 │  ┌───────────────────────┴───────────────────────────┐  │
 │  │              Routing Engine (router.py)            │  │
@@ -62,8 +69,10 @@ software/
 │   ├── hw_midi.py           ← Hardware MIDI OUT via Pi native UARTs
 │   ├── gadget.py            ← USB gadget MIDI device management
 │   ├── preset_manager.py    ← Load/save/switch routing presets
-│   ├── clip_launcher.py     ← Ableton-style clip session, 96 PPQ clock
+│   ├── clip_launcher.py     ← Ableton-style clip session, 96 PPQ clock, tick subscribers
 │   ├── midi_player.py       ← MIDI file playback with tempo/loop control
+│   ├── quick_recorder.py    ← Live MIDI capture with BPM/quantize/count-in
+│   ├── midi_looper.py       ← 4-slot MIDI looper with overdub, BPM/quantize/count-in
 │   ├── midi_logger.py       ← Ring buffer MIDI monitor (thread-safe)
 │   ├── ui_web.py            ← Flask web interface + REST API
 │   ├── ipc.py               ← IPC bridge (shared state, command queue)
@@ -131,7 +140,47 @@ All pending messages per port are drained in a single `iter_pending()` call each
 - Clip launches quantized to beat/bar/2bar/4bar boundaries
 - External clock mode: syncs to incoming MIDI clock from any device
 
-### 7. Mode Detection
+### 7. Clock-Synced Recording (Recorder & Looper)
+
+Both the Quick Recorder and MIDI Looper support clock-synced recording via the clip launcher's tick subscriber mechanism.
+
+**Tick Subscriber Pattern:**
+
+```text
+ClipLauncher._advance_tick()
+  → for each subscriber: fn(tick, beat, bar, transport_running)
+    → QuickRecorder._on_tick()   (checks for quantum boundary → starts recording)
+    → MidiLooper._on_tick()      (checks for quantum boundary → starts slot recording)
+```
+
+**Clock Sources** (configurable per system):
+
+- `standalone` — own clock thread (same pattern as launcher's `_internal_clock_loop`)
+- `launcher` — subscribes to launcher's tick callbacks (shared BPM/transport)
+- `external` — syncs to incoming MIDI clock from hardware
+
+**Quantize Grid** (at 96 PPQ):
+
+- `free`: no quantize (immediate start/stop, raw-length loops)
+- `1/16`: 24 ticks, `1/8`: 48 ticks, `1/4`: 96 ticks (1 beat)
+- `bar`: 96 × beats_per_bar, `2bar`: × 2, `4bar`: × 4
+
+**Count-in Flow:**
+
+1. User presses record → state becomes `count_in`
+2. Subscribe to clock (launcher ticks or start standalone clock)
+3. On each tick: check `tick % quantum_ticks == 0`
+4. When boundary hit: transition to `recording`, set `_record_start = time.monotonic()`
+
+**Quantized Loop Length:**
+
+- On stop: `elapsed_ticks = raw_seconds / tick_interval`
+- Round UP to nearest quantum: `((elapsed // qt) + 1) * qt`
+- Convert back to seconds for playback loop duration
+
+**State Persistence:** Clock settings (`source`, `bpm`, `quantize`, `beats_per_bar`) saved to `state.json` under `recorder_clock` and `looper_clock` keys.
+
+### 8. Mode Detection
 ```python
 def detect_mode():
     # Check USB gadget UDC state

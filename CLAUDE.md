@@ -76,8 +76,10 @@ IPC (src/ipc.py)
 | `src/device_registry.py` | USB ID → friendly name mapping, direction/channel overrides |
 | `src/preset_manager.py` | Load/save routing presets from JSON |
 | `src/state.py` | Persist/restore app state to `data/state.json` |
-| `src/clip_launcher.py` | Ableton-style clip playback, quantized launching, 96 PPQ clock |
+| `src/clip_launcher.py` | Ableton-style clip playback, quantized launching, 96 PPQ clock, tick subscribers |
 | `src/midi_player.py` | MIDI file playback with tempo/loop control |
+| `src/quick_recorder.py` | Live MIDI capture with BPM, quantize, count-in, save to .mid |
+| `src/midi_looper.py` | 4-slot MIDI looper with overdub, BPM, quantize, count-in |
 | `src/midi_logger.py` | Ring buffer MIDI monitor (500 messages), thread-safe |
 | `src/ipc.py` | IPC bridge (shared state, command queue, results) |
 | `src/ui_web.py` | Flask app, REST API, web UI serving |
@@ -113,9 +115,50 @@ IPC (src/ipc.py)
 
 Filter options: `channels` (list, 1-16), `remap_channel` (1-16), `message_types` (list: `"note"`, `"cc"`, `"program_change"`, `"pitchwheel"`, `"aftertouch"`, `"clock"`, `"sysex"`), `velocity_min/max` (0-127), `cc_numbers` (list), `block_clock` (bool), `block_sysex` (bool).
 
+## Recording / Looper
+
+Both the Quick Recorder and MIDI Looper support clock-synced recording:
+
+**Clock Source** (per system, configurable):
+
+- `standalone` — own independent BPM (default)
+- `launcher` — sync to clip launcher's clock (shared BPM, shared transport)
+- `external` — sync to incoming MIDI clock from hardware
+
+**Quantize Options** (at 96 PPQ internal resolution):
+
+| Quantize | Ticks |
+|---|---|
+| Free | — (no quantize, raw real-time) |
+| 1/16 note | 24 |
+| 1/8 note | 48 |
+| 1/4 note (beat) | 96 |
+| 1 bar | 96 × beats_per_bar |
+| 2 bars | × 2 |
+| 4 bars | × 4 |
+
+**Count-in**: When quantize is not "free", pressing record enters a "count_in" state. Recording starts automatically at the next quantum boundary. Visual beat dots pulse during count-in.
+
+**Quantized loop length**: When recording stops, the loop length snaps UP to the nearest quantum boundary. This ensures seamless looping on the beat grid.
+
+**Quick Recorder** (`src/quick_recorder.py`):
+
+- Single-slot live capture from ALL hardware MIDI inputs
+- Playback through router (applies existing routing rules)
+- Save recordings to `.mid` files
+- State machine: `idle → count_in → recording → stopped/playing`
+
+**MIDI Looper** (`src/midi_looper.py`):
+
+- 4 independent loop slots with per-slot source/destination
+- Overdub: layer new notes while playing (overdub does NOT re-quantize loop length)
+- State machine per slot: `empty → count_in → recording → playing ↔ overdubbing → stopped`
+
+**Tick Subscriber Mechanism**: The clip launcher exposes `register_tick_subscriber(fn)` / `unregister_tick_subscriber(fn)`. Subscribers receive `(tick, beat, bar, transport_running)` on each internal tick. The recorder and looper use this to sync to the launcher's clock when in "launcher" mode.
+
 ## State Persistence
 
-Saved to `software/data/state.json`. Includes: current preset, active routes, clock source, device overrides, clip launcher state. Auto-backup before each save. Restored on startup.
+Saved to `software/data/state.json`. Includes: current preset, active routes, clock source, device overrides, clip launcher state, recorder clock settings, looper clock settings. Auto-backup before each save. Restored on startup.
 
 ## How to Run (Dev / macOS)
 
@@ -131,7 +174,7 @@ Useful flags: `--list-devices`, `--list-presets`, `--preset NAME`, `--port PORT`
 
 ## Web UI Pages
 
-Dashboard, Routing (patchbay matrix), Launcher (clip session view), Presets, MIDI Monitor, Player (MIDI file), Logs, System, Settings.
+Dashboard, Routing (patchbay matrix), Launcher (clip session view), Presets, MIDI Monitor, Record (quick recorder), Looper (4-slot MIDI looper), Player (MIDI file), Logs, System, Settings.
 
 REST API base: `http://<pi-ip>:8080/api/...`
 
@@ -144,6 +187,7 @@ REST API base: `http://<pi-ip>:8080/api/...`
 5. **Preset JSON** — human-readable, shareable routing snapshots.
 6. **Clip launcher** — quantized to beat/bar boundaries using internal 96 PPQ clock.
 7. **USB gadget** — Linux libcomposite/configfs makes Pi appear as multi-port MIDI interface.
+8. **Clock-synced recording** — recorder/looper share launcher's clock via tick subscribers, or run standalone. Count-in waits for quantum boundary. Loop lengths snap to grid.
 
 ## Hardware / Power
 

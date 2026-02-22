@@ -90,7 +90,26 @@ class ClipLauncher:
 
         self._lock = threading.Lock()
 
+        # Tick subscribers — called on each tick with (tick, beat, bar, running)
+        self._tick_subscribers: list = []
+
         MIDI_FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Tick subscribers
+    # ------------------------------------------------------------------
+
+    def register_tick_subscriber(self, fn):
+        """Register a callback: fn(tick, beat, bar, transport_running)."""
+        if fn not in self._tick_subscribers:
+            self._tick_subscribers.append(fn)
+
+    def unregister_tick_subscriber(self, fn):
+        """Unregister a tick callback."""
+        try:
+            self._tick_subscribers.remove(fn)
+        except ValueError:
+            pass
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -216,6 +235,13 @@ class ClipLauncher:
             for layer in self.layers:
                 if layer.active_clip is not None:
                     self._advance_clip(layer)
+
+            # Notify tick subscribers
+            for sub in self._tick_subscribers:
+                try:
+                    sub(self._tick, self._beat, self._bar, self._transport_running)
+                except Exception:
+                    pass
 
     def _is_quantum_boundary(self) -> bool:
         """Check if current tick is on a quantum boundary."""

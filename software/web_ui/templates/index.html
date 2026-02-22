@@ -37,6 +37,9 @@
       <li><a href="#recorder" data-page="recorder">
         <span class="nav-icon">&#9210;</span><span>Record</span>
       </a></li>
+      <li><a href="#looper" data-page="looper">
+        <span class="nav-icon">&#8634;</span><span>Looper</span>
+      </a></li>
       <li class="perf-hide"><a href="#player" data-page="player">
         <span class="nav-icon">&#9654;</span><span>Player</span>
       </a></li>
@@ -501,6 +504,43 @@
         <p>Record live MIDI from all inputs — press REC or foot pedal to start / stop</p>
       </div>
 
+      <!-- Clock Bar -->
+      <div class="card clock-bar">
+        <div class="clock-controls">
+          <div class="clock-mode">
+            <button class="tab-btn active" id="rec-clock-standalone" onclick="recSetClockSource('standalone')">OWN</button>
+            <button class="tab-btn" id="rec-clock-launcher" onclick="recSetClockSource('launcher')">SYNC</button>
+            <button class="tab-btn" id="rec-clock-ext" onclick="recSetClockSource('external')">EXT</button>
+          </div>
+          <div class="clock-bpm">
+            <button class="btn btn-sm" onclick="recAdjustBpm(-1)">-</button>
+            <input type="number" id="rec-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="recSetBpm(this.value)">
+            <button class="btn btn-sm" onclick="recAdjustBpm(1)">+</button>
+            <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
+          </div>
+          <div class="clock-quantum">
+            <select id="rec-quantize" onchange="recSetQuantize(this.value)">
+              <option value="free">Free</option>
+              <option value="1/16">1/16</option>
+              <option value="1/8">1/8</option>
+              <option value="1/4">1/4</option>
+              <option value="bar" selected>Bar</option>
+              <option value="2bar">2 Bars</option>
+              <option value="4bar">4 Bars</option>
+            </select>
+          </div>
+          <div class="beat-display" id="rec-beat-display">
+            <span class="beat-bar" id="rec-bar-label">BAR 1</span>
+            <span class="beat-dots" id="rec-beat-dots">
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+            </span>
+          </div>
+        </div>
+      </div>
+
       <!-- Transport card -->
       <div class="card">
         <div class="card-header">
@@ -555,6 +595,54 @@
           <div style="color:var(--text-muted);font-size:12px;padding:8px;">No recordings yet.</div>
         </div>
       </div>
+    </div>
+
+    <!-- ============== LOOPER ============== -->
+    <div class="page" id="page-looper">
+      <div class="page-header">
+        <h2>MIDI Looper</h2>
+        <p>4 loop slots with overdub — record, loop, and layer live MIDI</p>
+      </div>
+
+      <!-- Clock Bar -->
+      <div class="card clock-bar">
+        <div class="clock-controls">
+          <div class="clock-mode">
+            <button class="tab-btn active" id="loop-clock-standalone" onclick="loopSetClockSource('standalone')">OWN</button>
+            <button class="tab-btn" id="loop-clock-launcher" onclick="loopSetClockSource('launcher')">SYNC</button>
+            <button class="tab-btn" id="loop-clock-ext" onclick="loopSetClockSource('external')">EXT</button>
+          </div>
+          <div class="clock-bpm">
+            <button class="btn btn-sm" onclick="loopAdjustBpm(-1)">-</button>
+            <input type="number" id="loop-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="loopSetBpm(this.value)">
+            <button class="btn btn-sm" onclick="loopAdjustBpm(1)">+</button>
+            <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
+          </div>
+          <div class="clock-quantum">
+            <select id="loop-quantize" onchange="loopSetQuantize(this.value)">
+              <option value="free">Free</option>
+              <option value="1/16">1/16</option>
+              <option value="1/8">1/8</option>
+              <option value="1/4">1/4</option>
+              <option value="bar" selected>Bar</option>
+              <option value="2bar">2 Bars</option>
+              <option value="4bar">4 Bars</option>
+            </select>
+          </div>
+          <div class="beat-display" id="loop-beat-display">
+            <span class="beat-bar" id="loop-bar-label">BAR 1</span>
+            <span class="beat-dots" id="loop-beat-dots">
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+              <span class="beat-dot"></span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loop Slots -->
+      <div id="looper-slots"></div>
     </div>
 
     <!-- ============== LOGS ============== -->
