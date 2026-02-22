@@ -84,14 +84,6 @@ midi-box/
     └── renders/
 ```
 
-## Build Phases
-
-1. **Phase 1** — USB MIDI routing + Web UI (runs on Mac or Pi)
-2. **Phase 2** — USB gadget mode: Pi as MIDI interface for Logic Pro
-3. **Phase 3** — Custom 5-pin MIDI I/O board for MS-20 + Volcas
-4. **Phase 4** — 3D printed enclosure
-5. **Phase 5** — Polish, advanced features
-
 ## Quick Start (Mac)
 
 ```bash
