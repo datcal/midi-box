@@ -36,6 +36,11 @@ set -euo pipefail
 WIFI_COUNTRY="${WIFI_COUNTRY:-US}"   # Your country code (TR, GB, DE, FR, etc.)
 SERVICE_USER="${SERVICE_USER:-$(logname 2>/dev/null || echo pi)}"
 
+# --update-only: skip WiFi AP, UART overlays, kiosk, and reboot prompt.
+# Used when pi_setup.sh is called from update.sh for system-level upgrades.
+UPDATE_ONLY=false
+for arg in "$@"; do [[ "$arg" == "--update-only" ]] && UPDATE_ONLY=true; done
+
 # Colours
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()   { echo -e "${GREEN}[✓]${NC} $*"; }
@@ -201,6 +206,19 @@ EOF
 chmod 0440 "$SUDOERS_FILE"
 log "Sudoers entry written: $SUDOERS_FILE"
 
+# Sudoers: allow service user to run the update script and restart the service
+# without a password — needed for the web UI software update feature.
+SUDOERS_UPDATE="/etc/sudoers.d/midi-box-update"
+cat > "$SUDOERS_UPDATE" << EOF
+# MIDI Box — allow web UI to trigger software updates without a password
+$SERVICE_USER ALL=(ALL) NOPASSWD: $(dirname "$0")/update.sh *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart midi-box.service
+EOF
+chmod 0440 "$SUDOERS_UPDATE"
+log "Sudoers entry written: $SUDOERS_UPDATE"
+
+if [[ "$UPDATE_ONLY" == "false" ]]; then
+
 # ---------------------------------------------------------------------------
 # 6. WiFi Access Point
 # ---------------------------------------------------------------------------
@@ -315,3 +333,5 @@ else
     warn "Remember to reboot for WiFi AP to take effect!"
     info "  sudo reboot"
 fi
+
+fi  # end of UPDATE_ONLY == false block

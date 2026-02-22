@@ -66,6 +66,9 @@ def create_app(bridge):
     )
     app.config["SECRET_KEY"] = "midi-box-dev"
 
+    import updater as _updater
+    _updater.start_background_checker()
+
     def _state():
         """Return a snapshot of the shared state dict."""
         return bridge.state
@@ -783,6 +786,60 @@ def create_app(bridge):
     def api_system_restart():
         """Restart the MIDI Box service — sends SIGTERM to MIDI engine process."""
         return jsonify(_cmd("system.restart"))
+
+    # ---------------------------------------------------------------
+    # API: Software Updates
+    # ---------------------------------------------------------------
+
+    @app.route("/api/update/status")
+    def api_update_status():
+        """Return current version info, update availability, and running log."""
+        import updater
+        status = updater.get_status()
+        log_lines = updater.get_update_log()
+        return jsonify({
+            "current_version":  status["current_version"],
+            "latest_version":   status["latest_version"],
+            "update_available": status["update_available"],
+            "update_type":      status["update_type"],
+            "last_checked":     status["last_checked"],
+            "check_error":      status["check_error"],
+            "update_status":    status["update_status"],
+            "log":              log_lines,
+        })
+
+    @app.route("/api/update/check", methods=["POST"])
+    def api_update_check():
+        """Force an immediate update check against GitHub (runs synchronously)."""
+        import updater
+        result = updater.check_for_updates()
+        return jsonify({
+            "ok":               True,
+            "current_version":  result["current_version"],
+            "latest_version":   result["latest_version"],
+            "update_available": result["update_available"],
+            "update_type":      result["update_type"],
+            "last_checked":     result["last_checked"],
+            "check_error":      result["check_error"],
+        })
+
+    @app.route("/api/update/trigger", methods=["POST"])
+    def api_update_trigger():
+        """
+        Start the update process as a detached subprocess.
+        Body (optional): { "type": "simple" | "full" }
+        Falls back to the auto-detected type from the last check.
+        """
+        import updater
+        data = request.json or {}
+        status = updater.get_status()
+        update_type = data.get("type") or status.get("update_type") or "simple"
+        if update_type not in ("simple", "full"):
+            return jsonify({"ok": False, "error": f"Invalid type: {update_type}"}), 400
+        result = updater.trigger_update(update_type)
+        if not result.get("ok"):
+            return jsonify(result), 500
+        return jsonify(result)
 
     def _make_qr_svg(data: str) -> Response:
         try:

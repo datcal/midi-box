@@ -634,6 +634,9 @@ async function loadSettings() {
   document.getElementById('wifi-pass-input').value = '';
   document.getElementById('wifi-save-msg').textContent = '';
 
+  // Software update status
+  loadUpdateStatus();
+
   // RTP-MIDI status
   const badge = document.getElementById('rtpmidi-badge');
   const sessEl = document.getElementById('rtpmidi-sessions');
@@ -1566,6 +1569,183 @@ function startPolling() {
       updateDashboardActivity(data);
     } catch (_) { /* ignore transient failures */ }
   }, 2000);
+}
+
+// --- Software Update ---
+
+let _updatePollTimer = null;
+
+async function loadUpdateStatus() {
+  try {
+    const data = await api('/update/status');
+    _renderUpdateStatus(data);
+    if (data.update_status === 'running') {
+      _startUpdateLogPolling();
+    }
+  } catch (_) {}
+}
+
+function _renderUpdateStatus(data) {
+  const curEl    = document.getElementById('update-current-version');
+  const latEl    = document.getElementById('update-latest-version');
+  const badge    = document.getElementById('update-version-badge');
+  const typeInfo = document.getElementById('update-type-info');
+  const trigBtn  = document.getElementById('update-trigger-btn');
+  const checkedEl= document.getElementById('update-last-checked');
+  const errEl    = document.getElementById('update-error-msg');
+
+  if (!curEl) return;
+
+  curEl.value = data.current_version || '—';
+  latEl.value = data.latest_version  || '—';
+  if (checkedEl) {
+    checkedEl.textContent = data.last_checked
+      ? `Last checked: ${data.last_checked}` : '';
+  }
+
+  if (data.check_error) {
+    if (badge) {
+      badge.textContent = 'ERROR';
+      badge.style.background = 'rgba(231,76,60,0.15)';
+      badge.style.color = 'var(--danger)';
+    }
+    if (errEl) errEl.textContent = `Check failed: ${data.check_error}`;
+  } else if (data.update_status === 'running') {
+    if (badge) {
+      badge.textContent = 'UPDATING…';
+      badge.style.background = 'rgba(243,156,18,0.15)';
+      badge.style.color = 'var(--warning)';
+    }
+    if (trigBtn) trigBtn.disabled = true;
+  } else if (data.update_available) {
+    if (badge) {
+      badge.textContent = 'UPDATE AVAILABLE';
+      badge.style.background = 'rgba(243,156,18,0.15)';
+      badge.style.color = 'var(--warning)';
+    }
+    if (errEl) errEl.textContent = '';
+    if (typeInfo) {
+      typeInfo.textContent = data.update_type === 'full'
+        ? 'Full update — system packages + UART overlays + service restart'
+        : 'Simple update — code + pip packages + service restart';
+    }
+    if (trigBtn) {
+      trigBtn.style.display = '';
+      trigBtn.textContent = data.update_type === 'full'
+        ? 'Install Full Update' : 'Install Update';
+      trigBtn.disabled = false;
+    }
+  } else {
+    if (badge) {
+      badge.textContent = data.current_version ? 'UP TO DATE' : 'UNKNOWN';
+      badge.style.background = 'var(--accent-dim)';
+      badge.style.color = 'var(--accent)';
+    }
+    if (typeInfo) typeInfo.textContent = '';
+    if (trigBtn) trigBtn.style.display = 'none';
+    if (errEl) errEl.textContent = '';
+  }
+
+  const logWrap = document.getElementById('update-progress-wrap');
+  if (logWrap) {
+    logWrap.style.display =
+      (data.update_status === 'running' || (data.log && data.log.length > 0))
+        ? '' : 'none';
+  }
+  _renderUpdateLog(data.log || []);
+}
+
+function _renderUpdateLog(lines) {
+  const el = document.getElementById('update-log');
+  if (!el) return;
+  el.textContent = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function _startUpdateLogPolling() {
+  if (_updatePollTimer) return;
+  _updatePollTimer = setInterval(async () => {
+    try {
+      const data = await api('/update/status');
+      _renderUpdateStatus(data);
+      if (data.update_status !== 'running') {
+        _stopUpdateLogPolling();
+        // Service restarted successfully — reload after brief delay
+        setTimeout(() => location.reload(), 5000);
+      }
+    } catch (_) {
+      // Server went away — update triggered a restart; wait then reload
+      _stopUpdateLogPolling();
+      setTimeout(() => location.reload(), 7000);
+    }
+  }, 1500);
+}
+
+function _stopUpdateLogPolling() {
+  if (_updatePollTimer) {
+    clearInterval(_updatePollTimer);
+    _updatePollTimer = null;
+  }
+}
+
+async function checkForUpdates() {
+  const btn = document.getElementById('update-check-btn');
+  const err = document.getElementById('update-error-msg');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+  try {
+    await api('/update/check', { method: 'POST' });
+    const fullStatus = await api('/update/status');
+    _renderUpdateStatus(fullStatus);
+  } catch (_) {
+    if (err) err.textContent = 'Network error — could not reach server';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Check Now'; }
+  }
+}
+
+async function triggerUpdate() {
+  let updateType = 'simple';
+  try {
+    const status = await api('/update/status');
+    updateType = status.update_type || 'simple';
+  } catch (_) {}
+
+  const label = updateType === 'full' ? 'Full Update' : 'Update';
+  const extra = updateType === 'full'
+    ? '• Run full system setup (apt packages, UART overlays)\n' : '';
+
+  if (!confirm(
+    `Start ${label}?\n\n` +
+    `This will:\n` +
+    `• Pull latest code from GitHub\n` +
+    `• Install updated Python packages\n` +
+    extra +
+    `• Restart midi-box service\n\n` +
+    `The UI will be unavailable for ~30–60 seconds.`
+  )) return;
+
+  const btn = document.getElementById('update-trigger-btn');
+  const err = document.getElementById('update-error-msg');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+  if (err) err.textContent = '';
+
+  try {
+    const result = await api('/update/trigger', {
+      method: 'POST',
+      body: { type: updateType },
+    });
+    if (!result.ok) {
+      if (err) err.textContent = result.error || 'Failed to start update';
+      if (btn) { btn.disabled = false; }
+      return;
+    }
+    const logWrap = document.getElementById('update-progress-wrap');
+    if (logWrap) logWrap.style.display = '';
+    _startUpdateLogPolling();
+  } catch (_) {
+    if (err) err.textContent = 'Failed to trigger update';
+    if (btn) { btn.disabled = false; btn.textContent = 'Install Update'; }
+  }
 }
 
 // --- Hash-based navigation ---
