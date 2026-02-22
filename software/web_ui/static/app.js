@@ -829,22 +829,17 @@ function updateClockControls(clock) {
   document.getElementById('clock-ext').classList.toggle('active', clock.mode === 'external');
 
   _setLauncherBpmDisabled(clock.mode === 'external');
-
-  // Show detected external BPM label
-  const extLabel = document.getElementById('launcher-ext-bpm');
-  if (extLabel) {
-    if (clock.mode === 'external') {
-      extLabel.textContent = clock.ext_bpm ? `${clock.ext_bpm} BPM` : '-- BPM';
-      extLabel.style.display = '';
-    } else {
-      extLabel.style.display = 'none';
-    }
-  }
 }
 
 function _setLauncherBpmDisabled(disabled) {
-  const bpmDiv = document.getElementById('launcher-bpm')?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.display = disabled ? 'none' : '';
+  const bpmInput = document.getElementById('launcher-bpm');
+  const bpmMinus = document.getElementById('launcher-bpm-minus');
+  const bpmPlus  = document.getElementById('launcher-bpm-plus');
+  if (bpmInput) bpmInput.disabled = disabled;
+  if (bpmMinus) bpmMinus.disabled = disabled;
+  if (bpmPlus)  bpmPlus.disabled  = disabled;
+  const bpmDiv = bpmInput?.closest('.clock-bpm');
+  if (bpmDiv) bpmDiv.style.opacity = disabled ? '0.45' : '';
 }
 
 function updateBeatDisplay(poll) {
@@ -921,11 +916,6 @@ async function setClockMode(mode) {
   document.getElementById('clock-int').classList.toggle('active', mode === 'internal');
   document.getElementById('clock-ext').classList.toggle('active', mode === 'external');
   _setLauncherBpmDisabled(mode === 'external');
-  const extLabel = document.getElementById('launcher-ext-bpm');
-  if (extLabel) {
-    extLabel.style.display = mode === 'external' ? '' : 'none';
-    if (mode === 'external') extLabel.textContent = '-- BPM';
-  }
 }
 
 async function adjustBpm(delta) {
@@ -1478,12 +1468,19 @@ function _applyRecClockState(data) {
     if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
   });
 
-  // BPM — hide when synced to launcher OR external (sidebar shows live BPM instead)
-  const bpmHidden = data.clock_source === 'launcher' || data.clock_source === 'external';
+  // BPM — disabled when synced to launcher OR external
+  const bpmDisabled = data.clock_source === 'launcher' || data.clock_source === 'external';
   const bpmInput = document.getElementById('rec-bpm');
-  if (bpmInput && !bpmHidden) bpmInput.value = Math.round(data.bpm || 120);
+  const bpmMinus = document.getElementById('rec-bpm-minus');
+  const bpmPlus  = document.getElementById('rec-bpm-plus');
+  if (bpmInput) {
+    bpmInput.value = Math.round(data.bpm || 120);
+    bpmInput.disabled = bpmDisabled;
+  }
+  if (bpmMinus) bpmMinus.disabled = bpmDisabled;
+  if (bpmPlus)  bpmPlus.disabled  = bpmDisabled;
   const bpmDiv = bpmInput?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.display = bpmHidden ? 'none' : '';
+  if (bpmDiv) bpmDiv.style.opacity = bpmDisabled ? '0.45' : '';
 
   // Clock source context panel
   const _cspConfig = {
@@ -1500,9 +1497,7 @@ function _applyRecClockState(data) {
     external: {
       cls: 'external',
       icon: '⟵',
-      text: data.ext_bpm
-        ? `External MIDI clock — ${data.ext_bpm} BPM from hardware`
-        : 'External MIDI clock — waiting for clock signal from hardware.',
+      text: 'External MIDI clock — tempo received from hardware. Check the sidebar for live BPM.',
     },
   };
   const csp = _cspConfig[data.clock_source] || _cspConfig.standalone;
