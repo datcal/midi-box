@@ -128,7 +128,8 @@ apt-get install -y -qq \
     python3-rtmidi \
     libasound2-dev \
     hostapd dnsmasq \
-    chromium-browser xorg openbox unclutter \
+    avahi-daemon avahi-utils \
+    chromium xorg openbox unclutter \
     git curl
 
 log "System packages installed"
@@ -248,7 +249,7 @@ unclutter -idle 1 -root &   # hide mouse cursor after 1s idle
 # Wait for the MIDI Box web server to be ready
 until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 1; done
 
-exec chromium-browser \
+exec chromium \
     --kiosk \
     --noerrdialogs \
     --disable-infobars \

@@ -251,7 +251,7 @@ class RtpMidiServer:
         # Reply with OK on whichever port received the invite
         reply = _MAGIC + _CMD_ACCEPT + struct.pack(">I", _PROTOCOL_VER)
         reply += struct.pack(">I", token) + struct.pack(">I", self.ssrc)
-        reply += (name or self.name).encode("utf-8") + b"\x00"
+        reply += self.name.encode("utf-8") + b"\x00"
         try:
             sock.sendto(reply, addr)
         except OSError:
@@ -312,20 +312,32 @@ class RtpMidiServer:
                     pass
 
     def _parse_midi_payload(self, payload: bytes) -> list:
-        """Extract mido.Message objects from an Apple MIDI command section."""
+        """Extract mido.Message objects from an RTP-MIDI command section.
+
+        RTP-MIDI command section layout:
+          Byte 0 (short header) or Bytes 0-1 (long header):
+            Bit 7 (B flag): 1 = long header (12-bit length), 0 = short (4-bit)
+            Bit 6 (J flag): 1 = journal section follows (we ignore it)
+            Bit 5 (Z flag): 1 = delta-time precedes first MIDI command
+            Bit 4 (P flag): 1 = status byte present in first command (phantom)
+          Low bits: length of MIDI command section
+        """
         import mido
 
-        # Read B-header (1 or 2 bytes)
         if not payload:
             return []
+
         b0 = payload[0]
-        if b0 & 0x80:          # "big B" — 12-bit length
+        has_bflag = b0 & 0x80           # long header
+        has_delta = b0 & 0x20           # Z flag — delta-times present
+
+        if has_bflag:
             if len(payload) < 2:
                 return []
-            length  = ((b0 & 0x0F) << 8) | payload[1]
+            length   = ((b0 & 0x0F) << 8) | payload[1]
             data_off = 2
         else:
-            length  = b0 & 0x0F
+            length   = b0 & 0x0F
             data_off = 1
 
         if length == 0:
@@ -334,45 +346,76 @@ class RtpMidiServer:
         midi_bytes = payload[data_off: data_off + length]
         messages   = []
         i          = 0
+        running_status = 0
+
+        def _skip_delta():
+            """Skip a variable-length delta-time (VLQ). Returns new index."""
+            nonlocal i
+            while i < len(midi_bytes) and midi_bytes[i] & 0x80:
+                i += 1           # continuation bytes (bit 7 set)
+            if i < len(midi_bytes):
+                i += 1           # final byte (bit 7 clear)
+
+        # Skip initial delta-time if Z flag set
+        if has_delta:
+            _skip_delta()
 
         while i < len(midi_bytes):
-            # Skip any leading bytes < 0x80 (delta-time VLQ final bytes or padding)
-            while i < len(midi_bytes) and midi_bytes[i] < 0x80:
-                i += 1
-            if i >= len(midi_bytes):
-                break
-
-            status   = midi_bytes[i]
-            msg_type = status & 0xF0
-            channel  = status & 0x0F
+            b = midi_bytes[i]
 
             try:
-                if 0x80 <= status <= 0xEF:   # channel messages
+                if b >= 0x80 and b <= 0xEF:
+                    # Channel message with status byte
+                    status   = b
+                    running_status = status
+                    msg_type = status & 0xF0
                     need = 2 if msg_type in (0x80, 0x90, 0xA0, 0xB0, 0xE0) else 1
                     end  = i + 1 + need
                     if end > len(midi_bytes):
                         break
                     d = midi_bytes[i:end]
-                    if all(b < 0x80 for b in d[1:]):
+                    if all(byte < 0x80 for byte in d[1:]):
                         msg = mido.Message.from_bytes(list(d))
                         messages.append(msg)
                     i = end
-                elif status == 0xF8:
+                elif b < 0x80 and running_status:
+                    # Running status — reuse previous status byte
+                    msg_type = running_status & 0xF0
+                    need = 2 if msg_type in (0x80, 0x90, 0xA0, 0xB0, 0xE0) else 1
+                    end  = i + need
+                    if end > len(midi_bytes):
+                        break
+                    d = bytes([running_status]) + midi_bytes[i:end]
+                    if all(byte < 0x80 for byte in d[1:]):
+                        msg = mido.Message.from_bytes(list(d))
+                        messages.append(msg)
+                    i = end
+                elif b == 0xF8:
                     messages.append(mido.Message("clock"))
+                    running_status = 0
                     i += 1
-                elif status == 0xFA:
+                elif b == 0xFA:
                     messages.append(mido.Message("start"))
+                    running_status = 0
                     i += 1
-                elif status == 0xFB:
+                elif b == 0xFB:
                     messages.append(mido.Message("continue"))
+                    running_status = 0
                     i += 1
-                elif status == 0xFC:
+                elif b == 0xFC:
                     messages.append(mido.Message("stop"))
+                    running_status = 0
                     i += 1
                 else:
-                    i += 1   # unknown — skip
+                    running_status = 0
+                    i += 1   # unknown system byte — skip
             except Exception:
                 i += 1
+                continue
+
+            # Between MIDI commands, skip the inter-command delta-time
+            if has_delta and i < len(midi_bytes):
+                _skip_delta()
 
         return messages
 
@@ -415,17 +458,17 @@ class RtpMidiServer:
         try:
             from zeroconf import Zeroconf, ServiceInfo
             self._zeroconf = Zeroconf()
-            ip = self._local_ip()
+            addrs = self._local_ips()
             info = ServiceInfo(
                 "_apple-midi._udp.local.",
                 f"{self.name}._apple-midi._udp.local.",
-                addresses=[socket.inet_aton(ip)],
+                addresses=[socket.inet_aton(ip) for ip in addrs],
                 port=self.port,
                 properties={},
             )
             self._zeroconf.register_service(info)
             self._zconf_info = info
-            logger.info(f"RTP-MIDI: Bonjour registered '{self.name}' at {ip}:{self.port}")
+            logger.info(f"RTP-MIDI: Bonjour registered '{self.name}' on {addrs}:{self.port}")
         except ImportError:
             logger.info("RTP-MIDI: zeroconf not installed — Bonjour unavailable. "
                         "Add server manually in Audio MIDI Setup using the Pi's IP.")
@@ -441,10 +484,25 @@ class RtpMidiServer:
             except Exception:
                 pass
 
-    def _local_ip(self) -> str:
+    def _local_ips(self) -> list[str]:
+        """Return all non-loopback IPv4 addresses (wlan0, uap0, etc.)."""
+        import subprocess
+        addrs = set()
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
-        except OSError:
-            return "127.0.0.1"
+            # Use hostname -I on Linux (space-separated IPs)
+            out = subprocess.check_output(["hostname", "-I"], timeout=2,
+                                          stderr=subprocess.DEVNULL).decode().strip()
+            for ip in out.split():
+                if ":" not in ip and ip != "127.0.0.1":  # skip IPv6 and loopback
+                    addrs.add(ip)
+        except Exception:
+            pass
+        if not addrs:
+            # Fallback: connect to public DNS to find default route IP
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                    s.connect(("8.8.8.8", 80))
+                    addrs.add(s.getsockname()[0])
+            except OSError:
+                addrs.add("127.0.0.1")
+        return sorted(addrs)
