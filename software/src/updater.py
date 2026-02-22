@@ -6,13 +6,10 @@ Background thread checks GitHub Tags API every 6 hours.
 Update execution is a detached subprocess that outlives the service restart it triggers.
 """
 
-import json
 import logging
-import os
 import subprocess
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger("midi-box.updater")
@@ -23,8 +20,6 @@ _VERSION_FILE = _REPO_ROOT / "VERSION"
 _UPDATE_SCRIPT = _REPO_ROOT / "scripts" / "update.sh"
 _UPDATE_LOG = Path("/tmp/midi-box-update.log")
 
-# GitHub API — public repo, no auth needed
-_GITHUB_API_TAGS = "https://api.github.com/repos/datcal/midi-box/tags"
 _CHECK_INTERVAL_SECONDS = 6 * 3600  # 6 hours
 
 # Module-level state — written by background thread, read by Flask request threads
@@ -53,20 +48,40 @@ def get_current_version() -> str:
 
 def get_latest_version() -> tuple:
     """
-    Fetch latest tag name from GitHub API.
+    Fetch latest tag from the git remote using 'git ls-remote --tags origin'.
+    Works for both public and private repos — uses whatever git credentials
+    are configured on the machine (SSH keys, stored HTTPS credentials, etc.).
     Returns (tag_name_or_None, error_message_or_None).
-    GitHub returns tags newest-first.
     """
     try:
-        req = urllib.request.Request(
-            _GITHUB_API_TAGS,
-            headers={"User-Agent": "midi-box-updater/1.0"},
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--sort=-version:refname", "origin"],
+            capture_output=True, text=True, timeout=20, cwd=str(_REPO_ROOT),
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        if not data:
-            return None, "No tags found in repository"
-        return data[0]["name"], None
+        if result.returncode != 0:
+            return None, result.stderr.strip() or "git ls-remote failed"
+
+        # Output lines look like:
+        #   abc123  refs/tags/v1.0.0
+        #   def456  refs/tags/v1.0.0^{}   ← peeled annotated tag (skip these)
+        tags = []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].startswith("refs/tags/") and not parts[1].endswith("^{}"):
+                tags.append(parts[1].replace("refs/tags/", ""))
+
+        if not tags:
+            return None, "No tags found in remote repository"
+
+        # Pick the highest semver tag
+        def _sort_key(v):
+            try:
+                return [int(x) for x in v.lstrip("v").split(".")]
+            except Exception:
+                return [0]
+
+        tags.sort(key=_sort_key, reverse=True)
+        return tags[0], None
     except Exception as exc:
         return None, str(exc)
 
