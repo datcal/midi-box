@@ -998,11 +998,17 @@ async function addLayerModal() {
 
   const destSelect = document.getElementById('layer-add-dest');
   destSelect.innerHTML = outputDevices.map(d =>
-    `<option value="${esc(d.name)}">${esc(d.name)}</option>`
+    `<option value="${esc(d.name)}" data-channel="${d.midi_channel || 0}">${esc(d.name)}${d.midi_channel ? ' (ch ' + d.midi_channel + ')' : ''}</option>`
   ).join('');
 
+  // Auto-fill channel from device config when destination changes
+  destSelect.onchange = function() {
+    const selected = this.options[this.selectedIndex];
+    document.getElementById('layer-add-ch').value = selected ? (parseInt(selected.dataset.channel) || 0) : 0;
+  };
+
   document.getElementById('layer-add-name').value = '';
-  document.getElementById('layer-add-ch').value = 0;
+  destSelect.dispatchEvent(new Event('change'));  // pre-fill for initial selection
   document.getElementById('add-layer-modal').classList.add('active');
 }
 

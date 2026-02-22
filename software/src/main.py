@@ -377,11 +377,13 @@ class MidiBox:
             self.launcher.load_state(saved)
             logger.info(f"Launcher restored: {len(self.launcher.layers)} layers")
         else:
-            # Auto-create one layer per output device
+            # Auto-create one layer per output device, pre-seeding the device's
+            # configured MIDI channel so the launcher doesn't need manual setup.
             for dev in self.registry.get_output_devices():
                 self.launcher.add_layer(
                     name=dev.name,
                     destination=dev.name,
+                    midi_channel=dev.midi_channel if dev.midi_channel else None,
                 )
             logger.info(f"Launcher: auto-created {len(self.launcher.layers)} layers")
 
@@ -973,6 +975,12 @@ class MidiBox:
         # sending. 0 means "all channels" (no remapping). mido uses 0-indexed
         # channels internally, so we subtract 1 from the user-facing 1-indexed value.
         if device.midi_channel and hasattr(message, "channel"):
+            incoming_ch = message.channel + 1  # convert to 1-indexed for display
+            if incoming_ch != device.midi_channel:
+                logger.debug(
+                    "Channel remap: %s received ch%d → forced to ch%d",
+                    destination, incoming_ch, device.midi_channel,
+                )
             message = message.copy(channel=device.midi_channel - 1)
 
         ok = False
