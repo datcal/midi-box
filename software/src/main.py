@@ -968,6 +968,13 @@ class MidiBox:
         if not device:
             return False
 
+        # Apply device-level channel: if the device is configured for a specific
+        # MIDI channel (1-16), remap all channel messages to that channel before
+        # sending. 0 means "all channels" (no remapping). mido uses 0-indexed
+        # channels internally, so we subtract 1 from the user-facing 1-indexed value.
+        if device.midi_channel and hasattr(message, "channel"):
+            message = message.copy(channel=device.midi_channel - 1)
+
         ok = False
         if device.port_type == "usb":
             ok = self.alsa.send(device.port_id, message)
