@@ -59,8 +59,8 @@ class ClockManager:
 
         # External clock state
         self._ext_last_tick: float | None = None   # time.monotonic() of last 0xF8
-        self._ext_bpm: float | None = None          # detected BPM (circular buffer avg)
-        self._ext_tick_times: deque = deque(maxlen=24)  # last 24 tick timestamps
+        self._ext_bpm: float | None = None          # detected BPM (linear regression)
+        self._ext_tick_times: deque = deque(maxlen=48)  # last 48 tick timestamps (~1 s at 120 BPM)
         self._ext_clock_active: bool = False        # receiving ticks right now
         self._ext_clock_lost: bool = False          # source≠internal & no ticks
 
@@ -202,15 +202,21 @@ class ClockManager:
         now = time.monotonic()
 
         with self._lock:
-            # Accumulate timestamps; compute BPM as average over the full buffer window.
-            # This smooths out USB jitter without per-interval EMA instability.
+            # Accumulate tick timestamps and fit a line through (index, timestamp).
+            # Linear regression is immune to USB-bundled ticks: a single jittery
+            # timestamp shifts the result by ~1/n² instead of dominating the endpoints.
             self._ext_tick_times.append(now)
             n = len(self._ext_tick_times)
-            if n >= 4:
-                span = self._ext_tick_times[-1] - self._ext_tick_times[0]
-                if span > 0:
-                    # (n-1) intervals span from first to last timestamp
-                    self._ext_bpm = 60.0 * (n - 1) / (span * 24)
+            if n >= 8:
+                times = list(self._ext_tick_times)
+                i_mean = (n - 1) * 0.5
+                t_mean = sum(times) / n
+                num = sum((i - i_mean) * (t - t_mean) for i, t in enumerate(times))
+                den = n * (n * n - 1) / 12.0  # == Σ(i − ī)² for i = 0..n-1
+                if den > 0:
+                    slope = num / den  # seconds per MIDI tick
+                    if slope > 0:
+                        self._ext_bpm = 60.0 / (slope * 24)
 
             was_lost = self._ext_clock_lost
             self._ext_last_tick = now   # kept for watchdog timeout detection
