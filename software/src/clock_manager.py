@@ -61,6 +61,7 @@ class ClockManager:
         self._ext_last_tick: float | None = None   # time.monotonic() of last 0xF8
         self._ext_bpm: float | None = None          # detected BPM (linear regression)
         self._ext_tick_times: deque = deque(maxlen=96)  # last 96 tick timestamps (~2 s at 120 BPM)
+        self._display_bpm: float | None = None      # display-only EMA of _ext_bpm
         self._ext_clock_active: bool = False        # receiving ticks right now
         self._ext_clock_lost: bool = False          # source≠internal & no ticks
 
@@ -119,6 +120,7 @@ class ClockManager:
             # Reset external state
             self._ext_last_tick = None
             self._ext_bpm = None
+            self._display_bpm = None
             self._ext_tick_times.clear()
             self._ext_clock_active = False
             self._ext_clock_lost = False
@@ -217,6 +219,11 @@ class ClockManager:
                     slope = num / den  # seconds per MIDI tick
                     if slope > 0:
                         self._ext_bpm = 60.0 / (slope * 24)
+                        # Smooth display-only value (α=0.2); absorbs rare GIL-pause outliers
+                        if self._display_bpm is None:
+                            self._display_bpm = self._ext_bpm
+                        else:
+                            self._display_bpm = self._display_bpm * 0.8 + self._ext_bpm * 0.2
 
             was_lost = self._ext_clock_lost
             self._ext_last_tick = now   # kept for watchdog timeout detection
@@ -257,7 +264,7 @@ class ClockManager:
             return {
                 "bpm": self._bpm,
                 "source": self._source,
-                "ext_bpm": round(self._ext_bpm) if self._ext_bpm is not None else None,
+                "ext_bpm": round(self._display_bpm) if self._display_bpm is not None else None,
                 "ext_clock_active": self._ext_clock_active,
                 "ext_clock_lost": self._ext_clock_lost,
             }
@@ -347,6 +354,7 @@ class ClockManager:
                     self._next_tick_time = time.perf_counter()
                     self._ext_tick_times.clear()
                     self._ext_bpm = None
+                    self._display_bpm = None
                 logger.warning(
                     f"External clock lost (source: {source!r}) — "
                     f"falling back to internal at {self._bpm:.0f} BPM"
