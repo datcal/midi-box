@@ -526,16 +526,24 @@ def create_app(bridge):
 
     @app.route("/api/player")
     def api_player_status():
-        return jsonify(dict(_state().get("player", {"status": {}, "files": []})))
+        return jsonify(dict(_state().get("player", {"status": {}, "files": {"folders": [], "files": []}})))
+
+    @app.route("/api/player/files")
+    def api_player_files():
+        """Return file list for a specific folder (or root if no folder param)."""
+        folder = request.args.get("folder") or None
+        return jsonify(_cmd("player.list_files", {"folder": folder}))
 
     @app.route("/api/player/upload", methods=["POST"])
     def api_player_upload():
         file = request.files.get("file")
         if not file or not file.filename:
             return jsonify({"ok": False, "error": "No file"}), 400
+        folder = request.form.get("folder") or None
         return jsonify(_cmd("player.upload", {
             "filename": file.filename,
             "data": file.read(),
+            "folder": folder,
         }))
 
     @app.route("/api/player/play", methods=["POST"])
@@ -548,6 +556,7 @@ def create_app(bridge):
         return jsonify(_cmd("player.play", {
             "file": filename,
             "destination": destination,
+            "folder": data.get("folder"),
             "loop": data.get("loop", False),
             "tempo": data.get("tempo", 1.0),
         }))
@@ -577,7 +586,59 @@ def create_app(bridge):
     @app.route("/api/player/delete", methods=["POST"])
     def api_player_delete():
         data = request.json
-        return jsonify(_cmd("player.delete", {"file": data.get("file", "")}))
+        return jsonify(_cmd("player.delete", {
+            "file": data.get("file", ""),
+            "folder": data.get("folder"),
+        }))
+
+    @app.route("/api/player/rename", methods=["POST"])
+    def api_player_rename():
+        data = request.json
+        old_name = data.get("old_name", "")
+        new_name = data.get("new_name", "")
+        if not old_name or not new_name:
+            return jsonify({"ok": False, "error": "old_name and new_name required"}), 400
+        return jsonify(_cmd("player.rename", {
+            "old_name": old_name,
+            "new_name": new_name,
+            "folder": data.get("folder"),
+        }))
+
+    @app.route("/api/player/mkdir", methods=["POST"])
+    def api_player_mkdir():
+        data = request.json
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "name required"}), 400
+        return jsonify(_cmd("player.mkdir", {"name": name}))
+
+    @app.route("/api/player/rename_folder", methods=["POST"])
+    def api_player_rename_folder():
+        data = request.json
+        return jsonify(_cmd("player.rename_folder", {
+            "old_name": data.get("old_name", ""),
+            "new_name": data.get("new_name", ""),
+        }))
+
+    @app.route("/api/player/delete_folder", methods=["POST"])
+    def api_player_delete_folder():
+        data = request.json
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "error": "name required"}), 400
+        return jsonify(_cmd("player.delete_folder", {"name": name}))
+
+    @app.route("/api/player/move", methods=["POST"])
+    def api_player_move():
+        data = request.json
+        filename = data.get("filename", "")
+        if not filename:
+            return jsonify({"ok": False, "error": "filename required"}), 400
+        return jsonify(_cmd("player.move", {
+            "filename": filename,
+            "src_folder": data.get("src_folder"),
+            "dst_folder": data.get("dst_folder"),
+        }))
 
     # ---------------------------------------------------------------
     # API: Application Logs

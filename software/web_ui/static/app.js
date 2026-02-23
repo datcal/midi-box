@@ -1158,6 +1158,9 @@ async function uploadLauncherFile(input) {
 // --- MIDI Player ---
 
 let playerInterval = null;
+let playerCurrentFolder = null;   // null = root, string = subfolder name
+let playerDestination = null;
+let playerCurrentStatus = {};
 
 async function loadPlayer() {
   const [playerData, devData] = await Promise.all([
@@ -1165,30 +1168,260 @@ async function loadPlayer() {
     api('/devices'),
   ]);
 
-  // Populate file select
-  const fileSelect = document.getElementById('player-file');
-  fileSelect.innerHTML = playerData.files.length === 0
-    ? '<option value="">No MIDI files — upload one</option>'
-    : playerData.files.map(f =>
-        `<option value="${esc(f.name)}">${esc(f.name)} (${f.duration}s, ${f.tracks} tracks)</option>`
-      ).join('');
-
-  // Populate destination select (output devices)
+  // Populate destination select (output devices only)
   const destSelect = document.getElementById('player-dest');
-  const outputDevices = devData.devices.filter(d => d.direction === 'both' || d.direction === 'out');
+  const outputDevices = (devData.devices || []).filter(d =>
+    d.direction === 'both' || d.direction === 'out'
+  );
   destSelect.innerHTML = outputDevices.map(d =>
     `<option value="${esc(d.name)}">${esc(d.name)}</option>`
   ).join('');
 
-  // Restore current status
-  updatePlayerUI(playerData.status);
+  // Restore saved destination
+  if (playerDestination) {
+    destSelect.value = playerDestination;
+  }
+  if (!destSelect.value && outputDevices.length) {
+    playerDestination = outputDevices[0].name;
+    destSelect.value = playerDestination;
+  }
 
-  // Render file list
-  renderMidiFileList(playerData.files);
+  // Restore status
+  const status = playerData.status || {};
+  playerCurrentStatus = status;
+  updatePlayerStatusBadge(status);
 
-  // Start polling player status
+  // Restore loop checkbox
+  document.getElementById('player-loop').checked = status.loop || false;
+
+  // Init upload zone (idempotent)
+  initUploadZone();
+
+  // Navigate to root and render
+  playerCurrentFolder = null;
+  await refreshMidiFileList();
+
+  // Start polling
   if (playerInterval) clearInterval(playerInterval);
-  playerInterval = setInterval(pollPlayerStatus, 500);
+  playerInterval = setInterval(pollPlayerStatus, 600);
+}
+
+// -------------------------------------------------------------------
+// Upload zone
+// -------------------------------------------------------------------
+
+function initUploadZone() {
+  const zone = document.getElementById('player-upload-zone');
+  if (!zone || zone._uploadInited) return;
+  zone._uploadInited = true;
+
+  zone.addEventListener('click', (e) => {
+    if (e.target.closest('button') || e.target.tagName === 'INPUT') return;
+    document.getElementById('midi-upload').click();
+  });
+
+  zone.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    zone.classList.add('drag-over');
+  });
+
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+
+  zone.addEventListener('dragleave', (e) => {
+    if (!zone.contains(e.relatedTarget)) zone.classList.remove('drag-over');
+  });
+
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files).filter(f =>
+      /\.(mid|midi)$/i.test(f.name)
+    );
+    if (files.length === 0) {
+      showUploadError('Only .mid / .midi files are supported.');
+      return;
+    }
+    uploadMidiFiles(files, playerCurrentFolder);
+  });
+}
+
+async function uploadMidiFiles(files, folder) {
+  const zone = document.getElementById('player-upload-zone');
+  const progressBar = document.getElementById('upload-progress-bar');
+  const progressWrap = document.getElementById('upload-progress');
+  const errorEl = document.getElementById('upload-error');
+
+  errorEl.style.display = 'none';
+  zone.classList.add('uploading');
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+
+  const fileArray = Array.from(files);
+  const errors = [];
+
+  for (let i = 0; i < fileArray.length; i++) {
+    const f = fileArray[i];
+    progressBar.style.width = Math.round((i / fileArray.length) * 100) + '%';
+
+    const formData = new FormData();
+    formData.append('file', f);
+    if (folder) formData.append('folder', folder);
+
+    try {
+      const resp = await fetch('/api/player/upload', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (!data.ok) errors.push(`${f.name}: ${data.error || 'upload failed'}`);
+    } catch {
+      errors.push(`${f.name}: network error`);
+    }
+  }
+
+  progressBar.style.width = '100%';
+  await new Promise(r => setTimeout(r, 300));
+
+  zone.classList.remove('uploading');
+  progressWrap.style.display = 'none';
+  progressBar.style.width = '0%';
+
+  // Reset input so the same file can be re-uploaded
+  const inp = document.getElementById('midi-upload');
+  if (inp) inp.value = '';
+
+  if (errors.length > 0) showUploadError(errors.join(' | '));
+
+  await refreshMidiFileList();
+}
+
+function showUploadError(msg) {
+  const el = document.getElementById('upload-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+// -------------------------------------------------------------------
+// File browser
+// -------------------------------------------------------------------
+
+async function refreshMidiFileList() {
+  const params = playerCurrentFolder
+    ? '?folder=' + encodeURIComponent(playerCurrentFolder)
+    : '';
+  const data = await api('/player/files' + params);
+  renderMidiFileList(data, playerCurrentFolder, playerCurrentStatus);
+}
+
+function renderMidiFileList(data, currentFolder, status) {
+  const browser = document.getElementById('midi-file-browser');
+  const breadcrumb = document.getElementById('player-breadcrumb');
+
+  // Breadcrumb
+  if (currentFolder) {
+    breadcrumb.innerHTML =
+      `<span class="player-breadcrumb-item" onclick="navigateToFolder(null)">Root</span>` +
+      `<span class="player-breadcrumb-sep">&#8250;</span>` +
+      `<span class="player-breadcrumb-current">${esc(currentFolder)}</span>`;
+  } else {
+    breadcrumb.innerHTML = `<span class="player-breadcrumb-current">Root</span>`;
+  }
+
+  const folders = data.folders || [];
+  const files = data.files || [];
+  const playingFile = status.file || null;
+  const playingFolder = status.folder !== undefined ? status.folder : null;
+
+  if (folders.length === 0 && files.length === 0) {
+    browser.innerHTML = `
+      <div style="padding:24px; text-align:center; color:var(--text-muted); font-size:13px;">
+        ${currentFolder
+          ? 'This folder is empty.'
+          : 'No MIDI files yet. Drop files onto the zone above.'}
+      </div>`;
+    return;
+  }
+
+  let html = '<ul class="midi-file-list">';
+
+  // Folders (only at root level)
+  for (const folder of folders) {
+    const fn = esc(folder.name);
+    html += `
+      <li class="midi-folder-item" onclick="navigateToFolder('${fn}')">
+        <span class="midi-folder-icon">&#128193;</span>
+        <span class="midi-folder-name">${fn}</span>
+        <span class="midi-folder-meta">${folder.file_count} file${folder.file_count !== 1 ? 's' : ''}</span>
+        <div class="btn-group" onclick="event.stopPropagation()">
+          <button class="btn btn-sm" onclick="renameFolder('${fn}')">Rename</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteFolder('${fn}')">Delete</button>
+        </div>
+      </li>`;
+  }
+
+  // Files
+  for (const f of files) {
+    const isPlaying = f.name === playingFile
+      && f.folder === playingFolder
+      && (status.playing || status.paused);
+    const playIcon = isPlaying ? '&#9632;' : '&#9654;';
+    const itemClass = isPlaying ? 'midi-file-item playing' : 'midi-file-item';
+    const fn = esc(f.name);
+    const folderArg = currentFolder ? `'${esc(currentFolder)}'` : 'null';
+
+    html += `
+      <li class="${itemClass}">
+        <button class="midi-file-play-btn"
+                onclick="playerPlayFile('${fn}', ${folderArg})"
+                title="${isPlaying ? 'Stop' : 'Play'}">${playIcon}</button>
+        <div class="midi-file-info">
+          <div class="midi-file-name">${fn}</div>
+          <div class="midi-file-meta">${f.duration}s &middot; ${f.tracks} track${f.tracks !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="midi-file-actions">
+          <button class="btn btn-sm" onclick="moveFile('${fn}', ${folderArg})">Move</button>
+          <button class="btn btn-sm" onclick="renameMidiFile('${fn}', ${folderArg})">Rename</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteMidiFile('${fn}', ${folderArg})">Delete</button>
+        </div>
+      </li>`;
+  }
+
+  html += '</ul>';
+  browser.innerHTML = html;
+}
+
+// -------------------------------------------------------------------
+// Playback controls
+// -------------------------------------------------------------------
+
+async function playerPlayFile(name, folder) {
+  const status = playerCurrentStatus;
+  // Toggle: if this file is already active, stop it
+  if (status.file === name && status.folder === folder && (status.playing || status.paused)) {
+    await playerStop();
+    return;
+  }
+  const dest = document.getElementById('player-dest').value;
+  if (!dest) return;
+  const loop = document.getElementById('player-loop').checked;
+
+  await api('/player/play', {
+    method: 'POST',
+    body: { file: name, folder, destination: dest, loop, tempo: 1.0 },
+  });
+
+  // Optimistic update
+  playerCurrentStatus = { ...status, playing: true, paused: false, file: name, folder };
+  updatePlayerStatusBadge(playerCurrentStatus);
+  await refreshMidiFileList();
+}
+
+async function playerStop() {
+  await api('/player/stop', { method: 'POST' });
+  playerCurrentStatus = {};
+  updatePlayerStatusBadge({});
+  await refreshMidiFileList();
 }
 
 async function pollPlayerStatus() {
@@ -1198,114 +1431,155 @@ async function pollPlayerStatus() {
     return;
   }
   const data = await api('/player');
-  updatePlayerUI(data.status);
+  if (!data || !data.status) return;
+
+  const status = data.status;
+  const prevFile = playerCurrentStatus.file;
+  const prevFolder = playerCurrentStatus.folder;
+  const prevPlaying = playerCurrentStatus.playing || playerCurrentStatus.paused;
+  playerCurrentStatus = status;
+
+  updatePlayerStatusBadge(status);
+
+  // Refresh file list only when playing state or active file changes
+  const fileChanged = status.file !== prevFile || status.folder !== prevFolder;
+  const stateChanged = (status.playing || status.paused) !== prevPlaying;
+  if (fileChanged || stateChanged) {
+    await refreshMidiFileList();
+  }
 }
 
-function updatePlayerUI(status) {
-  const playBtn = document.getElementById('player-play-btn');
-  const pauseBtn = document.getElementById('player-pause-btn');
+function updatePlayerStatusBadge(status) {
+  const badge = document.getElementById('player-status-badge');
   const stopBtn = document.getElementById('player-stop-btn');
-  const statusEl = document.getElementById('player-status');
-
-  // BPM display (from ClockManager)
-  const bpmEl = document.getElementById('player-bpm');
-  if (bpmEl && status.bpm) bpmEl.textContent = `${Math.round(status.bpm)} BPM`;
+  if (!badge) return;
 
   if (status.playing) {
-    playBtn.disabled = true;
-    pauseBtn.disabled = false;
-    pauseBtn.textContent = 'Pause';
-    stopBtn.disabled = false;
-    const pos = status.position || 0;
-    const dur = status.duration || 0;
-    statusEl.textContent = `Playing: ${status.file} → ${status.destination} (${pos.toFixed(1)}s / ${dur.toFixed(1)}s)${status.loop ? ' [LOOP]' : ''}`;
-    statusEl.style.color = 'var(--accent)';
+    badge.textContent = 'PLAYING';
+    badge.className = 'rec-state-badge playing';
+    if (stopBtn) stopBtn.disabled = false;
   } else if (status.paused) {
-    playBtn.disabled = true;
-    pauseBtn.disabled = false;
-    pauseBtn.textContent = 'Resume';
-    stopBtn.disabled = false;
-    statusEl.textContent = `Paused: ${status.file}`;
-    statusEl.style.color = 'var(--warning, #f0a030)';
+    badge.textContent = 'PAUSED';
+    badge.className = 'rec-state-badge stopped';
+    if (stopBtn) stopBtn.disabled = false;
   } else {
-    playBtn.disabled = false;
-    pauseBtn.disabled = true;
-    pauseBtn.textContent = 'Pause';
-    stopBtn.disabled = true;
-    statusEl.textContent = 'Stopped';
-    statusEl.style.color = 'var(--text-muted)';
+    badge.textContent = 'STOPPED';
+    badge.className = 'rec-state-badge';
+    if (stopBtn) stopBtn.disabled = true;
   }
 }
 
-async function playerPlay() {
-  const file = document.getElementById('player-file').value;
-  const dest = document.getElementById('player-dest').value;
-  const loop = document.getElementById('player-loop').checked;
-  const tempo = parseInt(document.getElementById('player-tempo').value) / 100;
+function playerSetLoop(checked) {
+  api('/player/loop', { method: 'POST', body: { loop: checked } });
+}
 
-  if (!file || !dest) return;
+function playerDestinationChanged() {
+  playerDestination = document.getElementById('player-dest').value;
+}
 
-  await api('/player/play', {
+// -------------------------------------------------------------------
+// Folder navigation & management
+// -------------------------------------------------------------------
+
+async function navigateToFolder(name) {
+  playerCurrentFolder = name;
+  await refreshMidiFileList();
+}
+
+async function createFolder() {
+  const name = prompt('New folder name:');
+  if (!name || !name.trim()) return;
+  const result = await api('/player/mkdir', { method: 'POST', body: { name: name.trim() } });
+  if (!result.ok) {
+    alert('Could not create folder: ' + (result.error || 'unknown error'));
+    return;
+  }
+  await navigateToFolder(result.name || name.trim());
+}
+
+async function renameFolder(name) {
+  const newName = prompt(`Rename folder "${name}" to:`, name);
+  if (!newName || !newName.trim() || newName.trim() === name) return;
+  const result = await api('/player/rename_folder', {
     method: 'POST',
-    body: { file, destination: dest, loop, tempo },
+    body: { old_name: name, new_name: newName.trim() },
   });
-}
-
-async function playerPause() {
-  const data = await api('/player');
-  if (data.status.paused) {
-    await api('/player/resume', { method: 'POST' });
-  } else {
-    await api('/player/pause', { method: 'POST' });
+  if (!result.ok) {
+    alert('Rename failed: ' + (result.error || 'unknown error'));
+    return;
   }
+  await refreshMidiFileList();
 }
 
-async function playerStop() {
-  await api('/player/stop', { method: 'POST' });
-}
-
-async function uploadMidiFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const resp = await fetch('/api/player/upload', { method: 'POST', body: formData });
-  const data = await resp.json();
-
-  if (data.ok) {
-    loadPlayer();
-  } else {
-    alert('Upload failed: ' + (data.error || 'unknown error'));
+async function deleteFolder(name) {
+  if (!confirm(`Delete folder "${name}" and ALL its MIDI files? This cannot be undone.`)) return;
+  const result = await api('/player/delete_folder', { method: 'POST', body: { name } });
+  if (!result.ok) {
+    alert('Delete failed: ' + (result.error || 'unknown error'));
+    return;
   }
-  input.value = '';
+  await refreshMidiFileList();
 }
 
-async function deleteMidiFile(name) {
+// -------------------------------------------------------------------
+// File management
+// -------------------------------------------------------------------
+
+async function renameMidiFile(name, folder) {
+  const suggestion = name.replace(/\.mid$/i, '');
+  const newName = prompt(`Rename "${name}" to:`, suggestion);
+  if (!newName || !newName.trim()) return;
+  const result = await api('/player/rename', {
+    method: 'POST',
+    body: { old_name: name, new_name: newName.trim(), folder },
+  });
+  if (!result.ok) {
+    alert('Rename failed: ' + (result.error || 'unknown error'));
+    return;
+  }
+  await refreshMidiFileList();
+}
+
+async function deleteMidiFile(name, folder) {
   if (!confirm(`Delete "${name}"?`)) return;
-  await api('/player/delete', { method: 'POST', body: { file: name } });
-  loadPlayer();
+  await api('/player/delete', { method: 'POST', body: { file: name, folder } });
+  await refreshMidiFileList();
 }
 
-function renderMidiFileList(files) {
-  const list = document.getElementById('midi-file-list');
-  if (files.length === 0) {
-    list.innerHTML = '<li class="preset-item" style="color:var(--text-muted);">No MIDI files uploaded. Click "Upload .mid" to add one.</li>';
+async function moveFile(name, srcFolder) {
+  const data = await api('/player/files');
+  const folders = (data.folders || []).map(f => f.name);
+  const options = ['(Root)', ...folders.filter(f => f !== srcFolder)];
+
+  if (options.length === 1 && srcFolder === null) {
+    alert('No folders exist yet. Create a folder first with "+ Folder".');
     return;
   }
 
-  list.innerHTML = files.map(f => `
-    <li class="preset-item">
-      <div>
-        <div class="preset-name">${esc(f.name)}</div>
-        <div class="preset-desc">${f.duration}s &middot; ${f.tracks} track${f.tracks !== 1 ? 's' : ''}</div>
-      </div>
-      <div class="btn-group">
-        <button class="btn btn-sm btn-danger" onclick="deleteMidiFile('${esc(f.name)}')">Delete</button>
-      </div>
-    </li>
-  `).join('');
+  const choiceStr = prompt(
+    `Move "${name}" to:\n` +
+    options.map((o, i) => `  ${i}: ${o}`).join('\n') +
+    '\n\nEnter number:'
+  );
+  if (choiceStr === null || choiceStr === '') return;
+
+  const idx = parseInt(choiceStr, 10);
+  if (isNaN(idx) || idx < 0 || idx >= options.length) return;
+
+  const dstFolder = idx === 0 ? null : options[idx];
+  if (dstFolder === srcFolder) return;
+
+  const result = await api('/player/move', {
+    method: 'POST',
+    body: { filename: name, src_folder: srcFolder, dst_folder: dstFolder },
+  });
+  if (!result.ok) {
+    alert('Move failed: ' + (result.error || 'unknown error'));
+    return;
+  }
+
+  playerCurrentFolder = dstFolder;
+  await refreshMidiFileList();
 }
 
 // --- Device Config Modal ---

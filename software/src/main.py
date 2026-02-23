@@ -829,6 +829,7 @@ class MidiBox:
         elif action == "player.play":
             ok = self.player.play(
                 params["file"], params["destination"],
+                folder=params.get("folder"),
                 loop=params.get("loop", False),
                 tempo_factor=params.get("tempo", 1.0),
             )
@@ -855,12 +856,40 @@ class MidiBox:
             return {"ok": True}
 
         elif action == "player.upload":
-            ok = self.player.upload(params["filename"], params["data"])
-            return {"ok": ok}
+            result = self.player.upload(
+                params["filename"], params["data"],
+                folder=params.get("folder"),
+            )
+            return result if isinstance(result, dict) else {"ok": result}
 
         elif action == "player.delete":
-            ok = self.player.delete(params["file"])
+            ok = self.player.delete(params["file"], folder=params.get("folder"))
             return {"ok": ok}
+
+        elif action == "player.list_files":
+            return self.player.list_files(folder=params.get("folder"))
+
+        elif action == "player.rename":
+            return self.player.rename(
+                params["old_name"], params["new_name"],
+                folder=params.get("folder"),
+            )
+
+        elif action == "player.mkdir":
+            return self.player.mkdir(params["name"])
+
+        elif action == "player.rename_folder":
+            return self.player.rename_folder(params["old_name"], params["new_name"])
+
+        elif action == "player.delete_folder":
+            return self.player.delete_folder(params["name"])
+
+        elif action == "player.move":
+            return self.player.move(
+                params["filename"],
+                params.get("src_folder"),
+                params.get("dst_folder"),
+            )
 
         # --- State management ---
         elif action == "state.export":
@@ -1007,7 +1036,7 @@ class MidiBox:
         # Player
         self.bridge.state["player"] = {
             "status": self.player.status,
-            "files": self.player.list_files(),
+            "files": self.player.list_files(),  # root-level {"folders":..., "files":...}
         }
 
         # Looper

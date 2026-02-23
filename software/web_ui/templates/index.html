@@ -466,50 +466,52 @@
         <p>Play MIDI files to any destination</p>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <h3>Transport</h3>
-          <div class="btn-group">
-            <button class="btn btn-sm" onclick="document.getElementById('midi-upload').click()">Upload .mid</button>
-            <input type="file" id="midi-upload" accept=".mid,.midi" style="display:none" onchange="uploadMidiFile(this)">
+      <!-- Card 1: Clock Bar (BPM + Destination + Status) -->
+      <div class="card clock-bar" id="player-clock-bar">
+        <div class="clock-controls">
+          <div class="clock-bpm">
+            <button class="btn btn-sm" data-bpm-step onclick="adjustBpm(-1)">-</button>
+            <input type="number" data-bpm-sync id="player-bpm" value="120" min="20" max="300"
+                   style="width:60px; text-align:center;" onchange="setBpm(this.value)">
+            <button class="btn btn-sm" data-bpm-step onclick="adjustBpm(1)">+</button>
+            <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
           </div>
-        </div>
-
-        <div class="player-transport" id="player-transport">
-          <div class="player-file-row">
-            <label>File</label>
-            <select id="player-file" style="flex:1;"></select>
-            <label style="margin-left:12px;">Destination</label>
-            <select id="player-dest" style="flex:1;"></select>
+          <div class="player-destination">
+            <label style="font-size:11px; color:var(--text-muted); margin-right:6px;">TO</label>
+            <select id="player-dest" onchange="playerDestinationChanged()"></select>
           </div>
-          <div class="player-controls">
-            <button class="btn btn-accent" id="player-play-btn" onclick="playerPlay()">Play</button>
-            <button class="btn" id="player-pause-btn" onclick="playerPause()" disabled>Pause</button>
-            <button class="btn btn-danger" id="player-stop-btn" onclick="playerStop()" disabled>Stop</button>
-            <label style="font-size:12px; display:flex; align-items:center; gap:4px; margin-left:12px;">
-              <input type="checkbox" id="player-loop"> Loop
-            </label>
-            <label style="font-size:12px; display:flex; align-items:center; gap:6px; margin-left:12px;">
-              Tempo
-              <input type="range" id="player-tempo" min="25" max="200" value="100" style="width:80px;"
-                     oninput="document.getElementById('player-tempo-val').textContent = this.value + '%'">
-              <span id="player-tempo-val">100%</span>
-            </label>
-          </div>
-          <div style="display:flex; align-items:center; gap:16px; margin-top:8px;">
-            <div class="player-status" id="player-status" style="font-size:12px; color:var(--text-muted); flex:1;">
-              Stopped
-            </div>
-            <span id="player-bpm" style="font-size:12px; font-weight:600; color:var(--accent);"></span>
-          </div>
+          <label class="exclusive-label" style="gap:8px;">
+            <input type="checkbox" id="player-loop" onchange="playerSetLoop(this.checked)">
+            <span class="exclusive-switch"></span>
+            <span>Loop</span>
+          </label>
+          <span class="rec-state-badge" id="player-status-badge">STOPPED</span>
+          <button class="btn btn-danger btn-sm" id="player-stop-btn" onclick="playerStop()" disabled>&#9632; Stop</button>
         </div>
       </div>
 
-      <div class="card" style="margin-top:12px;">
-        <div class="card-header">
-          <h3>MIDI Files</h3>
+      <!-- Card 2: Upload Zone -->
+      <div class="card upload-zone" id="player-upload-zone">
+        <div class="upload-zone-inner" id="upload-zone-inner">
+          <div class="upload-zone-icon">&#8659;</div>
+          <div class="upload-zone-text">Drop .mid files here or tap to browse</div>
+          <div class="upload-zone-hint">Multiple files supported</div>
+          <input type="file" id="midi-upload" accept=".mid,.midi" multiple style="display:none"
+                 onchange="uploadMidiFiles(this.files, playerCurrentFolder)">
         </div>
-        <ul class="preset-list" id="midi-file-list"></ul>
+        <div class="upload-progress" id="upload-progress" style="display:none;">
+          <div class="upload-progress-bar" id="upload-progress-bar"></div>
+        </div>
+        <div class="upload-error" id="upload-error" style="display:none;"></div>
+      </div>
+
+      <!-- Card 3: File Browser -->
+      <div class="card">
+        <div class="card-header">
+          <div class="player-breadcrumb" id="player-breadcrumb"></div>
+          <button class="btn btn-sm" onclick="createFolder()">+ Folder</button>
+        </div>
+        <div id="midi-file-browser"></div>
       </div>
     </div>
 
