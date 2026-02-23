@@ -72,6 +72,11 @@ class ClockManager:
         self._tick_subs: list = []  # fn(tick, beat, bar, running)
         self._bpm_subs: list = []   # fn(bpm)
 
+        # MIDI clock output callback: fn() called at 24 PPQ (one MIDI 0xF8 per call).
+        # For internal source: fired every 4th internal tick by the clock thread.
+        # For external source: fired once per received 0xF8 (forwarding).
+        self._midi_clock_callback = None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -144,6 +149,11 @@ class ClockManager:
         if fn not in self._bpm_subs:
             self._bpm_subs.append(fn)
 
+    def register_midi_clock_callback(self, fn) -> None:
+        """Register fn() called on every MIDI clock output tick (24 PPQ).
+        Used to broadcast 0xF8 to all connected output devices."""
+        self._midi_clock_callback = fn
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -198,7 +208,7 @@ class ClockManager:
                         self._ext_bpm = detected
                     else:
                         # Exponential moving average (fast response, smooth output)
-                        self._ext_bpm = self._ext_bpm * 0.85 + detected * 0.15
+                        self._ext_bpm = self._ext_bpm * 0.15 + detected * 0.85
 
             was_lost = self._ext_clock_lost
             self._ext_last_tick = now
@@ -208,6 +218,13 @@ class ClockManager:
 
         if was_lost:
             logger.info("External clock recovered")
+
+        # Forward the raw clock tick to output devices immediately
+        if self._midi_clock_callback:
+            try:
+                self._midi_clock_callback()
+            except Exception:
+                pass
 
         # Advance 4 internal ticks per MIDI 0xF8 (24→96 PPQ conversion)
         for _ in range(CLOCK_TICKS_PER_MIDI):
@@ -275,10 +292,19 @@ class ClockManager:
             tick = self._tick
             beat = self._beat
             bar = self._bar
+            is_internal = (self._source == "internal") or self._fallback_active
 
         for sub in list(self._tick_subs):
             try:
                 sub(tick, beat, bar, True)
+            except Exception:
+                pass
+
+        # Generate MIDI clock output for internal source (every 4 ticks = 24 PPQ).
+        # External source is handled directly in on_midi_clock_tick.
+        if is_internal and tick % CLOCK_TICKS_PER_MIDI == 0 and self._midi_clock_callback:
+            try:
+                self._midi_clock_callback()
             except Exception:
                 pass
 

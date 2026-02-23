@@ -138,13 +138,16 @@ class MidiRouter:
         # Record activity
         self._record_activity(source_name, message.type, is_input=True)
 
-        # Clock gating: only forward clock from the designated source
+        # Clock gating: only forward clock from the designated source.
+        # Clock distribution to all outputs is handled by ClockManager's
+        # _midi_clock_callback (broadcast), not by per-device routes.
         if message.type in ("clock", "start", "stop", "continue", "songpos"):
             if self._clock_source and source_name != self._clock_source:
                 return
-            # Forward to clip launcher for external clock sync
+            # Deliver to ClockManager / Launcher, then stop — don't route through table.
             if self._clock_callback and message.type in ("clock", "start", "stop", "continue"):
                 self._clock_callback(message)
+            return
 
         # O(1) source lookup — index rebuilt atomically on route changes
         routes_for_source = self._routes_by_source.get(source_name)
