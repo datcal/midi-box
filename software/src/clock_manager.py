@@ -60,7 +60,7 @@ class ClockManager:
         # External clock state
         self._ext_last_tick: float | None = None   # time.monotonic() of last 0xF8
         self._ext_bpm: float | None = None          # detected BPM (linear regression)
-        self._ext_tick_times: deque = deque(maxlen=48)  # last 48 tick timestamps (~1 s at 120 BPM)
+        self._ext_tick_times: deque = deque(maxlen=96)  # last 96 tick timestamps (~2 s at 120 BPM)
         self._ext_clock_active: bool = False        # receiving ticks right now
         self._ext_clock_lost: bool = False          # source≠internal & no ticks
 
@@ -257,7 +257,7 @@ class ClockManager:
             return {
                 "bpm": self._bpm,
                 "source": self._source,
-                "ext_bpm": round(self._ext_bpm, 1) if self._ext_bpm is not None else None,
+                "ext_bpm": round(self._ext_bpm) if self._ext_bpm is not None else None,
                 "ext_clock_active": self._ext_clock_active,
                 "ext_clock_lost": self._ext_clock_lost,
             }
