@@ -17,21 +17,20 @@ STATE_FILE = STATE_DIR / "state.json"
 BACKUP_FILE = STATE_DIR / "state.backup.json"
 
 DEFAULT_STATE = {
-    "version": 1,
+    "version": 2,
     "current_preset": "default",
-    "clock_source": None,
+    "clock": {              # unified clock — single BPM + source for whole system
+        "source": "internal",
+        "bpm": 120.0,
+    },
     "routes": [],
     "device_overrides": {},  # {device_name: {direction, device_type, midi_channel}}
-    "launcher": {},  # clip launcher state (layers, clips, clock config)
-    "recorder_clock": {
-        "source": "standalone",
-        "bpm": 120.0,
+    "launcher": {},          # clip launcher state (layers, quantum, beats_per_bar)
+    "recorder_clock": {      # per-module quantize only (BPM is in clock{})
         "quantize": "free",
         "beats_per_bar": 4,
     },
-    "looper_clock": {
-        "source": "standalone",
-        "bpm": 120.0,
+    "looper_clock": {        # per-module quantize only
         "quantize": "free",
         "beats_per_bar": 4,
     },
@@ -109,7 +108,26 @@ class StateManager:
         self.save()
 
     def set_clock_source(self, source: str | None):
+        # Legacy: kept for backward compat; use set_clock() for unified clock
         self.state["clock_source"] = source
+        self.save()
+
+    def get_clock(self) -> dict:
+        """Return unified clock state {source, bpm}."""
+        defaults = {"source": "internal", "bpm": 120.0}
+        stored = self.state.get("clock", {})
+        # Also migrate legacy launcher.clock.bpm if present and clock not set
+        if not stored and "launcher" in self.state:
+            launcher_clock = self.state["launcher"].get("clock", {})
+            if launcher_clock.get("bpm"):
+                defaults["bpm"] = launcher_clock["bpm"]
+        return {**defaults, **stored}
+
+    def set_clock(self, data: dict):
+        """Persist unified clock state."""
+        if "clock" not in self.state:
+            self.state["clock"] = {}
+        self.state["clock"].update(data)
         self.save()
 
     def get_preset(self) -> str:
@@ -138,14 +156,16 @@ class StateManager:
         self.save()
 
     def get_recorder_clock(self) -> dict:
-        return self.state.get("recorder_clock", {})
+        defaults = {"quantize": "free", "beats_per_bar": 4}
+        return {**defaults, **self.state.get("recorder_clock", {})}
 
     def set_recorder_clock(self, data: dict):
         self.state["recorder_clock"] = data
         self.save()
 
     def get_looper_clock(self) -> dict:
-        return self.state.get("looper_clock", {})
+        defaults = {"quantize": "free", "beats_per_bar": 4}
+        return {**defaults, **self.state.get("looper_clock", {})}
 
     def set_looper_clock(self, data: dict):
         self.state["looper_clock"] = data

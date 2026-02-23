@@ -7,9 +7,10 @@ MIDI Looper — real-time loop recorder for MIDI Box.
   - Overdub: layer new notes on top while already playing
   - Clear: wipe all recorded data
 
-Supports clock-synced recording with BPM, quantization, and count-in:
-  - Clock source: standalone (own BPM), launcher (sync to clip launcher),
-    or external (MIDI clock from hardware)
+Clock is provided by ClockManager (shared system BPM).  No per-module
+BPM — all clock-dependent behaviour follows the unified system clock.
+
+Supports clock-synced recording with quantization and count-in:
   - Quantize: free, 1/16, 1/8, 1/4, bar, 2bar, 4bar
   - Count-in: waits for next quantum boundary before recording starts
   - Quantized loop length: snaps first recording length to quantum boundary
@@ -196,45 +197,26 @@ class LoopSlot:
 class MidiLooper:
     """Manages NUM_SLOTS independent loop slots."""
 
-    def __init__(self):
+    def __init__(self, clock_manager=None):
         self.slots: list[LoopSlot] = [LoopSlot(i) for i in range(NUM_SLOTS)]
         self._send_callback: Optional[Callable] = None
         self._threads: dict[int, threading.Thread] = {}
         self._stops:   dict[int, threading.Event]  = {}
 
-        # Clock / quantize settings (global, shared across all slots)
-        self._clock_source = "standalone"   # "standalone", "launcher", "external"
-        self._bpm = 120.0
+        # Quantize settings (BPM comes from ClockManager)
         self._quantize = "free"
         self._beats_per_bar = 4
-        self._launcher = None               # reference to ClipLauncher
+        self._clock_manager = clock_manager  # shared ClockManager
 
-        # Clock position
+        # Clock position (updated by tick callback from ClockManager)
         self._tick = 0
         self._beat = 0
         self._bar = 0
         self._transport_running = False
 
-        # Standalone clock thread
-        self._clock_thread: Optional[threading.Thread] = None
-        self._clock_running = False
-        self._next_tick_time = 0.0
-
     # ------------------------------------------------------------------
-    # Clock / quantize configuration
+    # Quantize configuration
     # ------------------------------------------------------------------
-
-    def set_clock_source(self, source: str) -> None:
-        if source not in ("standalone", "launcher", "external"):
-            return
-        old = self._clock_source
-        self._clock_source = source
-        if old != source:
-            self._stop_standalone_clock()
-        logger.info(f"Looper clock source: {source}")
-
-    def set_bpm(self, bpm: float) -> None:
-        self._bpm = max(20.0, min(300.0, bpm))
 
     def set_quantize(self, quantize: str) -> None:
         if quantize in VALID_QUANTIZE:
@@ -244,53 +226,7 @@ class MidiLooper:
         self._beats_per_bar = max(1, min(16, beats))
 
     # ------------------------------------------------------------------
-    # Standalone clock
-    # ------------------------------------------------------------------
-
-    def _start_standalone_clock(self) -> None:
-        if self._clock_running:
-            return
-        self._clock_running = True
-        self._tick = 0
-        self._beat = 0
-        self._bar = 0
-        self._transport_running = True
-        self._next_tick_time = time.perf_counter()
-        self._clock_thread = threading.Thread(
-            target=self._standalone_clock_loop, daemon=True,
-            name="looper-clock",
-        )
-        self._clock_thread.start()
-
-    def _stop_standalone_clock(self) -> None:
-        self._clock_running = False
-        self._transport_running = False
-        if self._clock_thread:
-            self._clock_thread.join(timeout=1)
-            self._clock_thread = None
-
-    def _standalone_clock_loop(self) -> None:
-        while self._clock_running:
-            if not self._transport_running:
-                time.sleep(0.001)
-                continue
-            now = time.perf_counter()
-            if now >= self._next_tick_time:
-                tick_interval = 60.0 / (self._bpm * INTERNAL_PPQ)
-                self._next_tick_time += tick_interval
-                if self._next_tick_time < now:
-                    self._next_tick_time = now + tick_interval
-                self._on_tick(self._tick, self._beat, self._bar, True)
-                self._tick += 1
-                if self._tick % INTERNAL_PPQ == 0:
-                    self._beat += 1
-                    if self._beat >= self._beats_per_bar:
-                        self._beat = 0
-                        self._bar += 1
-            time.sleep(0.0002)
-
-    # ------------------------------------------------------------------
-    # Tick callback
+    # Tick callback (from ClockManager subscription)
     # ------------------------------------------------------------------
 
     def _on_tick(self, tick: int, beat: int, bar: int, running: bool) -> None:
@@ -304,24 +240,17 @@ class MidiLooper:
             return
 
         if tick % qt == 0:
-            # Signal all slots in count_in state
             for slot in self.slots:
                 if slot.state == "count_in":
                     slot._count_in_event.set()
 
     def _subscribe_to_clock(self) -> None:
-        if self._clock_source == "launcher" and self._launcher:
-            self._launcher.register_tick_subscriber(self._on_tick)
-            if not self._launcher._transport_running:
-                self._launcher.transport_start()
-        elif self._clock_source == "standalone":
-            self._start_standalone_clock()
+        if self._clock_manager:
+            self._clock_manager.register_tick_subscriber(self._on_tick)
 
     def _unsubscribe_from_clock(self) -> None:
-        if self._launcher:
-            self._launcher.unregister_tick_subscriber(self._on_tick)
-        if self._clock_source == "standalone":
-            self._stop_standalone_clock()
+        if self._clock_manager:
+            self._clock_manager.unregister_tick_subscriber(self._on_tick)
 
     # ------------------------------------------------------------------
     # Incoming MIDI feed (called by main.py on every message)
@@ -382,7 +311,7 @@ class MidiLooper:
             slot.start_recording()          # → overdubbing
 
         elif slot.state == "recording":
-            bpm = self._effective_bpm()
+            bpm = self._clock_manager.bpm if self._clock_manager else 120.0
             had_content = slot.stop_recording(
                 quantize=self._quantize, bpm=bpm,
                 beats_per_bar=self._beats_per_bar,
@@ -394,7 +323,7 @@ class MidiLooper:
                 self._unsubscribe_from_clock()
 
         elif slot.state == "overdubbing":
-            bpm = self._effective_bpm()
+            bpm = self._clock_manager.bpm if self._clock_manager else 120.0
             slot.stop_recording(
                 quantize=self._quantize, bpm=bpm,
                 beats_per_bar=self._beats_per_bar,
@@ -424,7 +353,7 @@ class MidiLooper:
             return {"ok": True, "state": slot.state}
         self._stop_playback(slot)
         if slot.state == "recording":
-            bpm = self._effective_bpm()
+            bpm = self._clock_manager.bpm if self._clock_manager else 120.0
             slot.stop_recording(
                 quantize=self._quantize, bpm=bpm,
                 beats_per_bar=self._beats_per_bar,
@@ -443,10 +372,9 @@ class MidiLooper:
         return {"ok": True}
 
     def get_status(self) -> dict:
-        bpm = self._effective_bpm()
+        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
         return {
             "slots": [s.get_status() for s in self.slots],
-            "clock_source": self._clock_source,
             "bpm": bpm,
             "quantize": self._quantize,
             "beats_per_bar": self._beats_per_bar,
@@ -460,16 +388,6 @@ class MidiLooper:
         for slot in self.slots:
             self._stop_playback(slot)
         self._unsubscribe_from_clock()
-        self._stop_standalone_clock()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _effective_bpm(self) -> float:
-        if self._clock_source == "launcher" and self._launcher:
-            return self._launcher.bpm
-        return self._bpm
 
     def _count_in_worker(self, slot: LoopSlot) -> None:
         """Wait for the count-in boundary, then start recording on slot."""

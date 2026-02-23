@@ -29,7 +29,14 @@ _DEFAULT_STATE = {
     "routes": [],           # list of route dicts
     "mode": "standalone",
     "preset": "default",
-    "clock_source": None,
+    "clock_source": None,   # legacy: router's routing clock source
+    "clock": {              # unified clock state from ClockManager
+        "bpm": 120.0,
+        "source": "internal",
+        "ext_bpm": None,
+        "ext_clock_active": False,
+        "ext_clock_lost": False,
+    },
     "platform": "unknown",
     "wifi_config": {},
     "midi_log": [],         # recent MIDI messages (last 100)

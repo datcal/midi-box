@@ -24,7 +24,7 @@ midi-box/
 │   └── build-phases.md
 ├── hardware/                      ← schematics, PCB, BOM
 └── software/
-    ├── src/                       ← all Python source (14 modules)
+    ├── src/                       ← all Python source (15 modules)
     ├── config/
     │   ├── devices.yaml           ← USB IDs → device names, serial ports → DIN connectors
     │   └── midi_box.yaml          ← app settings (platform, WiFi, web UI port)
@@ -68,6 +68,7 @@ IPC (src/ipc.py)
 | File | Responsibility |
 |------|---------------|
 | `src/main.py` | Entry point, process spawner, main MIDI loop |
+| `src/clock_manager.py` | **Unified clock** — single BPM + source for all modules; 96 PPQ tick distribution; ext clock watchdog |
 | `src/router.py` | Route table, routing logic, port activity tracking |
 | `src/midi_filter.py` | Per-route filtering (channel, message type, velocity, CC) |
 | `src/alsa_midi.py` | USB MIDI via ALSA/rtmidi, hotplug detection |
@@ -76,10 +77,10 @@ IPC (src/ipc.py)
 | `src/device_registry.py` | USB ID → friendly name mapping, direction/channel overrides |
 | `src/preset_manager.py` | Load/save routing presets from JSON |
 | `src/state.py` | Persist/restore app state to `data/state.json` |
-| `src/clip_launcher.py` | Ableton-style clip playback, quantized launching, 96 PPQ clock, tick subscribers |
+| `src/clip_launcher.py` | Ableton-style clip playback, quantized launching, subscribes to ClockManager ticks |
 | `src/midi_player.py` | MIDI file playback with tempo/loop control |
-| `src/quick_recorder.py` | Live MIDI capture with BPM, quantize, count-in, save to .mid |
-| `src/midi_looper.py` | 4-slot MIDI looper with overdub, BPM, quantize, count-in |
+| `src/quick_recorder.py` | Live MIDI capture with quantize, count-in, save to .mid; syncs to ClockManager |
+| `src/midi_looper.py` | 4-slot MIDI looper with overdub, quantize, count-in; syncs to ClockManager |
 | `src/midi_logger.py` | Ring buffer MIDI monitor (500 messages), thread-safe |
 | `src/ipc.py` | IPC bridge (shared state, command queue, results) |
 | `src/ui_web.py` | Flask app, REST API, web UI serving |
@@ -117,13 +118,14 @@ Filter options: `channels` (list, 1-16), `remap_channel` (1-16), `message_types`
 
 ## Recording / Looper
 
-Both the Quick Recorder and MIDI Looper support clock-synced recording:
+Both the Quick Recorder and MIDI Looper support clock-synced recording.
 
-**Clock Source** (per system, configurable):
+**Unified Clock (ClockManager):**
 
-- `standalone` — own independent BPM (default)
-- `launcher` — sync to clip launcher's clock (shared BPM, shared transport)
-- `external` — sync to incoming MIDI clock from hardware
+All modules share a single `ClockManager` instance as the source of truth for BPM and clock source:
+
+- `internal` — Pi generates its own clock. Set BPM anywhere (Launcher page, Settings page) and it propagates everywhere.
+- `<device_name>` — sync to 0xF8 MIDI clock from a named hardware device. BPM auto-detected from tick interval. If the device stops sending for 2 seconds, the system falls back to internal clock automatically and shows a warning banner.
 
 **Quantize Options** (at 96 PPQ internal resolution):
 
@@ -154,7 +156,7 @@ Both the Quick Recorder and MIDI Looper support clock-synced recording:
 - Overdub: layer new notes while playing (overdub does NOT re-quantize loop length)
 - State machine per slot: `empty → count_in → recording → playing ↔ overdubbing → stopped`
 
-**Tick Subscriber Mechanism**: The clip launcher exposes `register_tick_subscriber(fn)` / `unregister_tick_subscriber(fn)`. Subscribers receive `(tick, beat, bar, transport_running)` on each internal tick. The recorder and looper use this to sync to the launcher's clock when in "launcher" mode.
+**Tick Subscriber Mechanism**: `ClockManager` exposes `register_tick_subscriber(fn)` / `unregister_tick_subscriber(fn)`. Subscribers receive `(tick, beat, bar, transport_running)` on each internal tick. The Launcher, Recorder, and Looper all subscribe to ClockManager — they no longer maintain their own clocks.
 
 ## State Persistence
 
@@ -185,9 +187,9 @@ REST API base: `http://<pi-ip>:8080/api/...`
 3. **5 Hz state push** — engine updates shared state dict every 0.2s for UI refresh.
 4. **Device registry** — separates USB IDs from friendly names; overrides saved to state.
 5. **Preset JSON** — human-readable, shareable routing snapshots.
-6. **Clip launcher** — quantized to beat/bar boundaries using internal 96 PPQ clock.
+6. **Unified ClockManager** — single source of truth for BPM and clock source. All modules (Launcher, Recorder, Looper, Player) read from it. Changing BPM on any page propagates everywhere. External MIDI clock loss detected by watchdog (2 s timeout) → automatic fallback to internal.
 7. **USB gadget** — Linux libcomposite/configfs makes Pi appear as multi-port MIDI interface.
-8. **Clock-synced recording** — recorder/looper share launcher's clock via tick subscribers, or run standalone. Count-in waits for quantum boundary. Loop lengths snap to grid.
+8. **Clock-synced recording** — recorder/looper subscribe to ClockManager tick events. Count-in waits for quantum boundary. Loop lengths snap to grid.
 
 ## Hardware / Power
 

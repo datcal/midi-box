@@ -12,6 +12,39 @@ let monitorPaused = false;
 let pollInterval = null;
 let monitorInterval = null;
 let logInterval = null;
+let _currentBpm = 120;  // tracks last known BPM across all inputs
+
+// Sync all BPM inputs/displays to the same value without triggering re-POST
+function _syncBpmInputs(bpm) {
+  _currentBpm = bpm;
+  document.querySelectorAll('[data-bpm-sync]').forEach(el => {
+    if (el.matches(':focus')) return;
+    if (el.tagName === 'INPUT') el.value = Math.round(bpm);
+    else el.textContent = Math.round(bpm);
+  });
+}
+
+// Sync all clock source selects; update Design B badge and Design C chips
+function _syncClockSourceSelects(source) {
+  const isExt = source !== 'internal';
+  document.querySelectorAll('[data-clock-src-sync]').forEach(el => {
+    if (el.value !== source) el.value = source;
+  });
+  // Design B badge
+  const badge = document.getElementById('clock-b-badge');
+  if (badge) {
+    badge.textContent = isExt ? 'EXT' : 'INT';
+    badge.className = 'clock-mod-badge' + (isExt ? ' clock-mod-badge-ext' : '');
+  }
+  // Design C chips
+  const intChip = document.getElementById('clock-c-int-chip');
+  if (intChip) intChip.classList.toggle('active', !isExt);
+  const extChip = document.getElementById('clock-c-ext-chip');
+  if (extChip) {
+    extChip.classList.toggle('active', isExt);
+    if (isExt && extChip.value !== source) extChip.value = source;
+  }
+}
 
 // --- Navigation ---
 
@@ -74,15 +107,37 @@ async function api(path, opts = {}, timeoutMs = 6000) {
 // --- Dashboard ---
 
 async function loadDashboard() {
-  const [devData, routeData, monData] = await Promise.all([
+  const [devData, routeData, monData, clockData] = await Promise.all([
     api('/devices'),
     api('/routes'),
     api('/monitor?limit=1'),
+    api('/clock'),
   ]);
 
   devices = devData.devices;
   routes = routeData.routes;
   document.getElementById('mode-badge').textContent = devData.mode;
+
+  // Populate Design B & C clock selects with connected devices
+  if (clockData) {
+    const current = clockData.source || 'internal';
+    const deviceOptions = devices.map(d => {
+      const sel = d.name === current ? ' selected' : '';
+      return `<option value="${esc(d.name)}"${sel}>${esc(d.name)}</option>`;
+    }).join('');
+    const bSrc = document.getElementById('clock-b-source');
+    if (bSrc) {
+      bSrc.innerHTML = `<option value="internal"${current === 'internal' ? ' selected' : ''}>Internal</option>` + deviceOptions;
+    }
+    const cExt = document.getElementById('clock-c-ext-chip');
+    if (cExt) {
+      cExt.innerHTML = `<option value="">EXT &#9662;</option>` + deviceOptions;
+      if (current !== 'internal') cExt.value = current;
+    }
+    _syncClockSourceSelects(current);
+    _syncBpmInputs(clockData.bpm || 120);
+    _setLauncherBpmDisabled(current !== 'internal');
+  }
 
   // Stats
   document.getElementById('stat-devices').textContent = devices.length;
@@ -633,14 +688,6 @@ async function loadSettings() {
 
   _updatePerfBtn(!!data.performance_mode);
 
-  // Populate clock source dropdown
-  const select = document.getElementById('setting-clock-source');
-  select.innerHTML = '<option value="">None</option>';
-  devData.devices.forEach(d => {
-    const selected = d.name === data.clock_source ? 'selected' : '';
-    select.innerHTML += `<option value="${esc(d.name)}" ${selected}>${esc(d.name)}</option>`;
-  });
-
   // Populate connect / WiFi section
   document.getElementById('connect-ssid').textContent  = netData.ssid;
   document.getElementById('connect-pass').textContent  = netData.password;
@@ -722,9 +769,22 @@ function _wifiRestartCountdown(ssid, password, msg) {
   tick();
 }
 
-async function setClockSource() {
-  const source = document.getElementById('setting-clock-source').value || null;
-  await api('/settings/clock', { method: 'POST', body: { source } });
+// Live BPM update while dragging slider — visual only, no network request
+function setBpmLive(val) {
+  _syncBpmInputs(Math.max(20, Math.min(300, parseFloat(val) || 120)));
+}
+
+// Unified clock source setter — used by dashboard (B & C) and launcher page
+async function setClockSourceAll(source) {
+  if (!source) return;  // ignore empty EXT placeholder
+  await api('/clock/source', { method: 'POST', body: { source } });
+  _syncClockSourceSelects(source);
+  _setLauncherBpmDisabled(source !== 'internal');
+  if (source === 'internal') {
+    ['clock-lost-banner', 'clock-b-lost', 'clock-c-lost'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+  }
 }
 
 // --- Export / Import ---
@@ -795,11 +855,27 @@ let launcherData = null;
 let pendingClipAssign = null; // {layerId, slot}
 
 async function loadLauncher() {
-  const data = await api('/launcher');
+  const [data, clockData, devData] = await Promise.all([
+    api('/launcher'),
+    api('/clock'),
+    api('/devices'),
+  ]);
   launcherData = data;
 
+  // Populate clock source select with Internal + all devices
+  const srcSel = document.getElementById('launcher-clock-source');
+  if (srcSel) {
+    const current = (clockData && clockData.source) || 'internal';
+    srcSel.innerHTML = '<option value="internal">Internal</option>';
+    (devData.devices || []).forEach(d => {
+      const sel = d.name === current ? ' selected' : '';
+      srcSel.innerHTML += `<option value="${esc(d.name)}"${sel}>${esc(d.name)}</option>`;
+    });
+    srcSel.value = current;
+  }
+
   // Update clock controls
-  updateClockControls(data.clock);
+  updateClockControls(data.clock || {}, clockData || {});
 
   // Render layer grid
   renderLauncherGrid(data.layers, data.files);
@@ -818,28 +894,39 @@ async function pollLauncher() {
   const poll = await api('/launcher/poll');
   updateBeatDisplay(poll);
   updateClipStates(poll.layers);
+  if (poll.bpm) _syncBpmInputs(poll.bpm);
 }
 
-function updateClockControls(clock) {
-  document.getElementById('launcher-bpm').value = clock.bpm;
-  document.getElementById('launcher-quantum').value = clock.quantum;
-  document.getElementById('launcher-timesig').value = clock.beats_per_bar;
+function updateClockControls(launcherClock, globalClock) {
+  const bpm = Math.round((globalClock && globalClock.bpm) || launcherClock.bpm || 120);
+  const source = (globalClock && globalClock.source) || 'internal';
+  const isExternal = source !== 'internal';
 
-  document.getElementById('clock-int').classList.toggle('active', clock.mode === 'internal');
-  document.getElementById('clock-ext').classList.toggle('active', clock.mode === 'external');
+  _syncBpmInputs(bpm);
 
-  _setLauncherBpmDisabled(clock.mode === 'external');
+  const qSel = document.getElementById('launcher-quantum');
+  if (qSel) qSel.value = launcherClock.quantum || 'bar';
+
+  const tsSel = document.getElementById('launcher-timesig');
+  if (tsSel) tsSel.value = launcherClock.beats_per_bar || 4;
+
+  const srcSel = document.getElementById('launcher-clock-source');
+  if (srcSel && srcSel.value !== source) srcSel.value = source;
+
+  _setLauncherBpmDisabled(isExternal);
+
+  const lostBanner = document.getElementById('clock-lost-banner');
+  if (lostBanner) lostBanner.style.display = (globalClock && globalClock.ext_clock_lost) ? '' : 'none';
 }
 
 function _setLauncherBpmDisabled(disabled) {
-  const bpmInput = document.getElementById('launcher-bpm');
-  const bpmMinus = document.getElementById('launcher-bpm-minus');
-  const bpmPlus  = document.getElementById('launcher-bpm-plus');
-  if (bpmInput) bpmInput.disabled = disabled;
-  if (bpmMinus) bpmMinus.disabled = disabled;
-  if (bpmPlus)  bpmPlus.disabled  = disabled;
-  const bpmDiv = bpmInput?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.opacity = disabled ? '0.45' : '';
+  document.querySelectorAll('[data-bpm-sync], [data-bpm-step]').forEach(el => {
+    el.disabled = disabled;
+  });
+  // Visual dim on BPM wrapper elements
+  document.querySelectorAll('.clock-bpm, .clock-mod-bpm-row, .clock-bpm-display-row, .clock-c-steps').forEach(el => {
+    el.style.opacity = disabled ? '0.45' : '';
+  });
 }
 
 function updateBeatDisplay(poll) {
@@ -910,23 +997,21 @@ function renderLauncherGrid(layers, files) {
   }).join('');
 }
 
-// Clock controls
-async function setClockMode(mode) {
-  await api('/launcher/clock', { method: 'POST', body: { mode } });
-  document.getElementById('clock-int').classList.toggle('active', mode === 'internal');
-  document.getElementById('clock-ext').classList.toggle('active', mode === 'external');
-  _setLauncherBpmDisabled(mode === 'external');
+// Clock controls — all delegate to setClockSourceAll
+async function setLauncherClockSource(source) {
+  return setClockSourceAll(source);
 }
 
 async function adjustBpm(delta) {
-  const input = document.getElementById('launcher-bpm');
-  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
-  input.value = bpm;
-  await api('/launcher/clock', { method: 'POST', body: { bpm } });
+  const bpm = Math.max(20, Math.min(300, _currentBpm + delta));
+  _syncBpmInputs(bpm);
+  await api('/clock/bpm', { method: 'POST', body: { bpm } });
 }
 
 async function setBpm(val) {
-  await api('/launcher/clock', { method: 'POST', body: { bpm: parseFloat(val) } });
+  const bpm = Math.max(20, Math.min(300, parseFloat(val) || 120));
+  _syncBpmInputs(bpm);
+  await api('/clock/bpm', { method: 'POST', body: { bpm } });
 }
 
 async function setQuantum(val) {
@@ -1121,6 +1206,10 @@ function updatePlayerUI(status) {
   const pauseBtn = document.getElementById('player-pause-btn');
   const stopBtn = document.getElementById('player-stop-btn');
   const statusEl = document.getElementById('player-status');
+
+  // BPM display (from ClockManager)
+  const bpmEl = document.getElementById('player-bpm');
+  if (bpmEl && status.bpm) bpmEl.textContent = `${Math.round(status.bpm)} BPM`;
 
   if (status.playing) {
     playBtn.disabled = true;
@@ -1460,53 +1549,9 @@ function _applyRecorderState(data) {
 }
 
 function _applyRecClockState(data) {
-  // Clock source buttons
-  const sources = ['standalone', 'launcher', 'external'];
-  const ids = ['rec-clock-standalone', 'rec-clock-launcher', 'rec-clock-ext'];
-  sources.forEach((s, i) => {
-    const btn = document.getElementById(ids[i]);
-    if (btn) btn.className = 'tab-btn' + (data.clock_source === s ? ' active' : '');
-  });
-
-  // BPM — disabled when synced to launcher OR external
-  const bpmDisabled = data.clock_source === 'launcher' || data.clock_source === 'external';
-  const bpmInput = document.getElementById('rec-bpm');
-  const bpmMinus = document.getElementById('rec-bpm-minus');
-  const bpmPlus  = document.getElementById('rec-bpm-plus');
-  if (bpmInput) {
-    bpmInput.value = Math.round(data.bpm || 120);
-    bpmInput.disabled = bpmDisabled;
-  }
-  if (bpmMinus) bpmMinus.disabled = bpmDisabled;
-  if (bpmPlus)  bpmPlus.disabled  = bpmDisabled;
-  const bpmDiv = bpmInput?.closest('.clock-bpm');
-  if (bpmDiv) bpmDiv.style.opacity = bpmDisabled ? '0.45' : '';
-
-  // Clock source context panel
-  const _cspConfig = {
-    standalone: {
-      cls: 'standalone',
-      icon: '⊙',
-      text: 'Own clock — set tempo with BPM above',
-    },
-    launcher: {
-      cls: 'launcher',
-      icon: '⟲',
-      text: 'Synced to Launcher — BPM follows the Clip Launcher. Start the Launcher transport first.',
-    },
-    external: {
-      cls: 'external',
-      icon: '⟵',
-      text: 'External MIDI clock — tempo received from hardware. Check the sidebar for live BPM.',
-    },
-  };
-  const csp = _cspConfig[data.clock_source] || _cspConfig.standalone;
-  const panel  = document.getElementById('rec-clock-panel');
-  const cspTxt = document.getElementById('rec-csp-text');
-  const cspIco = document.getElementById('rec-csp-icon');
-  if (panel)  panel.className = 'clock-source-panel ' + csp.cls;
-  if (cspTxt) cspTxt.textContent = csp.text;
-  if (cspIco) cspIco.textContent = csp.icon;
+  // Read-only BPM display (from unified ClockManager)
+  const bpmDisplay = document.getElementById('rec-bpm-display');
+  if (bpmDisplay) bpmDisplay.textContent = `${Math.round(data.bpm || 120)} BPM`;
 
   // Quantize selector
   const qSel = document.getElementById('rec-quantize');
@@ -1521,7 +1566,6 @@ function _applyRecClockState(data) {
   if (dotsEl) {
     const bpb = data.beats_per_bar || 4;
     const dots = dotsEl.querySelectorAll('.beat-dot');
-    // Adjust dot count
     while (dots.length < bpb) {
       dotsEl.appendChild(Object.assign(document.createElement('span'), {className:'beat-dot'}));
     }
@@ -1530,7 +1574,6 @@ function _applyRecClockState(data) {
       d.style.display = i < bpb ? '' : 'none';
       d.classList.toggle('active', i === (data.beat || 0) && data.transport_running);
     });
-    // Count-in pulse
     if (recState === 'count_in') {
       allDots.forEach(d => d.classList.add('count-in-pulse'));
     } else {
@@ -1581,16 +1624,7 @@ async function recStop()                 { await api('/recorder/stop',      { me
 async function recClear()                { await api('/recorder/clear',     { method: 'POST' }); }
 async function recSetAutoPlay(val)       { await api('/recorder/auto_play', { method: 'POST', body: { value: val } }); }
 
-async function recSetClockSource(source) { await api('/recorder/clock', { method: 'POST', body: { source } }); }
-async function recSetBpm(bpm)            { await api('/recorder/clock', { method: 'POST', body: { bpm: parseFloat(bpm) } }); }
-async function recSetQuantize(q)         { await api('/recorder/clock', { method: 'POST', body: { quantize: q } }); }
-function recAdjustBpm(delta) {
-  const input = document.getElementById('rec-bpm');
-  if (!input || input.disabled) return;
-  const bpm = Math.max(20, Math.min(300, parseFloat(input.value) + delta));
-  input.value = bpm;
-  recSetBpm(bpm);
-}
+async function recSetQuantize(q) { await api('/recorder/clock', { method: 'POST', body: { quantize: q } }); }
 
 async function recSave() {
   const name = document.getElementById('rec-save-name')?.value.trim() || null;
@@ -1639,9 +1673,9 @@ async function recDelete(name) {
 
 const INFO_DATA = {
   'launcher-clock-mode': {
-    title: 'Clock Mode — INT / EXT',
-    musician: 'INT: The Launcher uses its own internal clock. You set the BPM and everything runs at that tempo.\n\nEXT: The Launcher follows MIDI clock signals coming from external hardware (drum machine, sequencer, DAW). BPM is locked to that device — you cannot change it here.',
-    dev: 'INT = internal ticker at interval 60.0 / (bpm × 96) s, emits 0xF8 every 4 ticks (24 PPQ).\nEXT = subscribes to incoming 0xF8 MIDI clock messages from connected devices via router inputs.',
+    title: 'Clock Source',
+    musician: 'Internal: MIDI Box generates its own clock. Set the BPM here and everything runs at that tempo.\n\nExternal device: MIDI Box syncs to incoming MIDI clock from your hardware (drum machine, DAW). BPM auto-detected from the device.\n\nIf the external device stops sending clock, MIDI Box falls back to internal automatically and shows a warning.',
+    dev: 'Internal = ClockManager internal ticker at 60.0 / (bpm × 96) s per tick.\nExternal = on_midi_clock_tick() called per 0xF8 from selected device; EMA BPM detection; watchdog falls back after 2 s of silence.',
   },
   'launcher-bpm': {
     title: 'BPM — Beats Per Minute',
@@ -1652,11 +1686,6 @@ const INFO_DATA = {
     title: 'Launch Quantum',
     musician: 'Decides when a clip starts or stops playing. "Bar" means clips always launch at the beginning of the next bar, keeping everything in time. "Beat" is more immediate — clips launch on the next beat.',
     dev: 'Quantization boundary in internal ticks:\nBeat = 96 ticks\nBar = 96 × beats_per_bar\n2bar = 96 × bpb × 2\n4bar = 96 × bpb × 4\nClip launch queued, fires at next boundary.',
-  },
-  'rec-clock-mode': {
-    title: 'Recording Clock Source',
-    musician: 'INTERNAL: The recorder uses its own independent clock. You control the BPM.\n\nSYNC: The recorder follows the Clip Launcher\'s clock and transport — same tempo, same beat position. Great for recording loops that will play back in the Launcher.\n\nEXT: The recorder syncs to incoming MIDI clock from your hardware (e.g. drum machine). BPM is set by the external device.',
-    dev: 'standalone = own ticker thread at set BPM.\nlauncher = register_tick_subscriber on ClipLauncher, receives (tick, beat, bar, running).\nexternal = derived from incoming 0xF8 MIDI clock messages at 24 PPQ.',
   },
   'rec-quantize': {
     title: 'Quantize / Loop Length Snap',
@@ -1821,18 +1850,28 @@ function updateSidebarLive(data) {
   const badge = document.getElementById('mode-badge');
   if (badge && data.mode) badge.textContent = data.mode;
 
+  const isExt = data.clock_source && data.clock_source !== 'internal';
+  const effectiveBpm = (isExt && data.ext_bpm) ? data.ext_bpm : (data.bpm || 120);
+
   // Clock mode label (INT / EXT)
   const clockMode = document.getElementById('sidebar-clock-mode');
-  if (clockMode) clockMode.textContent = data.clock_mode === 'external' ? 'EXT' : 'INT';
+  if (clockMode) clockMode.textContent = isExt ? 'EXT' : 'INT';
 
-  // BPM — show detected ext BPM when in external mode, otherwise show set BPM
+  // Sidebar BPM display
   const bpmEl = document.getElementById('sidebar-bpm');
-  if (bpmEl) {
-    const bpm = data.clock_mode === 'external' && data.ext_bpm
-      ? data.ext_bpm
-      : Math.round(data.bpm || 120);
-    bpmEl.innerHTML = `${bpm} <small>BPM</small>`;
-  }
+  if (bpmEl) bpmEl.innerHTML = `${Math.round(effectiveBpm)} <small>BPM</small>`;
+
+  // Keep all BPM inputs and clock source dropdowns in sync
+  _syncBpmInputs(effectiveBpm);
+  if (data.clock_source !== undefined) _syncClockSourceSelects(data.clock_source);
+  _setLauncherBpmDisabled(isExt);
+
+  // External clock lost banners (sidebar + dashboard B + dashboard C)
+  const lost = data.ext_clock_lost;
+  ['clock-lost-banner', 'clock-b-lost', 'clock-c-lost'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = lost ? '' : 'none';
+  });
 }
 
 // --- Software Update ---

@@ -33,6 +33,7 @@ from quick_recorder import QuickRecorder
 from gpio_pedal import GpioPedal
 from rtpmidi import RtpMidiServer
 from clip_launcher import ClipLauncher
+from clock_manager import ClockManager
 from state import StateManager
 from ui_web import LogBuffer, run_flask_process
 from ipc import IpcBridge, STATE_UPDATE_INTERVAL
@@ -84,9 +85,11 @@ class MidiBox:
         self.presets = PresetManager()
         self.state = StateManager()
         self.midi_logger = MidiLogger(max_entries=500)
-        self.player = MidiPlayer()
-        self.looper = MidiLooper()
-        self.launcher = ClipLauncher()
+        # ClockManager must be created before modules that depend on it
+        self.clock_manager = ClockManager()
+        self.player = MidiPlayer(clock_manager=self.clock_manager)
+        self.looper = MidiLooper(clock_manager=self.clock_manager)
+        self.launcher = ClipLauncher(clock_manager=self.clock_manager)
         self.log_buffer = LogBuffer()
         self.mode = "standalone"
         self.wifi_config = self._load_wifi_config()
@@ -96,7 +99,8 @@ class MidiBox:
         self.bridge = None
         self._performance_mode = False
         self._verbose = getattr(args, "verbose", False)
-        self.recorder = QuickRecorder(recordings_dir="data/recordings")
+        self.recorder = QuickRecorder(recordings_dir="data/recordings",
+                                      clock_manager=self.clock_manager)
         self.gpio_pedal = None
 
     def start(self):
@@ -126,11 +130,10 @@ class MidiBox:
         self.launcher._send_callback = self._send_midi
         self.recorder._router_callback = self.router.process_message
         self.launcher._output_devices_callback = self._get_output_device_names
-        self.router._clock_callback = self.launcher.on_clock_message
 
-        # Wire launcher reference for clock sync
-        self.recorder._launcher = self.launcher
-        self.looper._launcher = self.launcher
+        # Wire ClockManager clock callback via router:
+        # router calls this for clock/start/stop/continue from the designated source
+        self.router._clock_callback = self._on_external_clock_message
 
         # Open MIDI devices (real or mock)
         if self.args.mock:
@@ -168,7 +171,8 @@ class MidiBox:
         print(self.router.status())
         print()
 
-        # Start clip launcher clock
+        # Start ClockManager (tick engine) then Launcher (tick subscriber)
+        self.clock_manager.start()
         self.launcher.start()
 
         # Create IPC bridge and start web UI in a separate process
@@ -211,6 +215,7 @@ class MidiBox:
         if self.gpio_pedal:
             self.gpio_pedal.close()
         self.launcher.stop()
+        self.clock_manager.stop()
         if self.rtp_midi:
             self.rtp_midi.stop()
         self._save_state()
@@ -352,10 +357,7 @@ class MidiBox:
 
             logger.info(f"Restoring {len(saved_routes)} routes from saved state")
             self.router.load_routes(saved_routes)
-            clock = self.state.get_clock_source()
-            if clock:
-                self.router.set_clock_source(clock)
-            # Also set the preset name so the UI shows it
+            # Preset name (clock source is restored in _restore_clock_settings)
             self.presets.current_preset = self.state.get_preset()
         else:
             # No saved state — load from preset file
@@ -369,13 +371,13 @@ class MidiBox:
             return
         routes = self.presets.get_routes(data)
         self.router.load_routes(routes)
+        # Preset may specify a routing clock source (device name for forwarding)
         clock = self.presets.get_clock_source(data)
         if clock:
             self.router.set_clock_source(clock)
         # Save to state
         self.state.set_preset(name)
         self.state.set_routes(self.router.dump_routes())
-        self.state.set_clock_source(clock)
 
     def _init_launcher(self):
         """Initialize clip launcher — restore saved state or auto-create layers."""
@@ -394,19 +396,39 @@ class MidiBox:
                 )
             logger.info(f"Launcher: auto-created {len(self.launcher.layers)} layers")
 
+    def _on_external_clock_message(self, message) -> None:
+        """
+        Called by the router for every clock/start/stop/continue message from
+        the designated clock source device (router already gates by source).
+        """
+        if message.type == "clock":
+            self.clock_manager.on_midi_clock_tick()
+        elif message.type == "start":
+            self.clock_manager.on_transport_reset()
+            self.launcher.on_transport_message(message)
+        elif message.type in ("stop", "continue"):
+            self.launcher.on_transport_message(message)
+
     def _restore_clock_settings(self):
-        """Restore recorder/looper clock settings from saved state."""
+        """Restore unified clock settings and per-module quantize from saved state."""
+        # Unified clock (BPM + source)
+        clock = self.state.get_clock()
+        bpm = clock.get("bpm", 120.0)
+        source = clock.get("source", "internal")
+        self.clock_manager.set_bpm(bpm)
+        self.clock_manager.set_source(source)
+        if source != "internal":
+            self.router.set_clock_source(source)
+        logger.info(f"Clock restored: {bpm} BPM, source={source!r}")
+
+        # Per-module quantize
         rec_clock = self.state.get_recorder_clock()
         if rec_clock:
-            self.recorder.set_clock_source(rec_clock.get("source", "standalone"))
-            self.recorder.set_bpm(rec_clock.get("bpm", 120.0))
             self.recorder.set_quantize(rec_clock.get("quantize", "free"))
             self.recorder.set_beats_per_bar(rec_clock.get("beats_per_bar", 4))
 
         loop_clock = self.state.get_looper_clock()
         if loop_clock:
-            self.looper.set_clock_source(loop_clock.get("source", "standalone"))
-            self.looper.set_bpm(loop_clock.get("bpm", 120.0))
             self.looper.set_quantize(loop_clock.get("quantize", "free"))
             self.looper.set_beats_per_bar(loop_clock.get("beats_per_bar", 4))
 
@@ -415,24 +437,23 @@ class MidiBox:
         return [d.name for d in self.registry.get_output_devices()]
 
     def _persist(self):
-        """Persist routes and clock source to disk."""
+        """Persist routes to disk."""
         self.state.set_routes(self.router.dump_routes())
-        self.state.set_clock_source(self.router._clock_source)
 
     def _save_state(self):
         """Persist complete state to disk."""
         self.state.set_routes(self.router.dump_routes())
-        self.state.set_clock_source(self.router._clock_source)
+        # Unified clock state
+        self.state.set_clock({
+            "bpm": self.clock_manager.bpm,
+            "source": self.clock_manager.source,
+        })
         self.state.set_launcher_state(self.launcher.save_state())
         self.state.set_recorder_clock({
-            "source": self.recorder._clock_source,
-            "bpm": self.recorder._bpm,
             "quantize": self.recorder._quantize,
             "beats_per_bar": self.recorder._beats_per_bar,
         })
         self.state.set_looper_clock({
-            "source": self.looper._clock_source,
-            "bpm": self.looper._bpm,
             "quantize": self.looper._quantize,
             "beats_per_bar": self.looper._beats_per_bar,
         })
@@ -614,10 +635,37 @@ class MidiBox:
                 self.state.set_preset(None)
             return {"ok": ok}
 
+        # --- Clock (unified) ---
+        elif action == "clock.bpm":
+            bpm = float(params.get("bpm", 120.0))
+            self.clock_manager.set_bpm(bpm)
+            self.state.set_clock({
+                "bpm": self.clock_manager.bpm,
+                "source": self.clock_manager.source,
+            })
+            return {"ok": True, "bpm": self.clock_manager.bpm}
+
+        elif action == "clock.source":
+            source = params.get("source", "internal")
+            self.clock_manager.set_source(source)
+            # Update router to gate MIDI clock from the right device
+            self.router.set_clock_source(None if source == "internal" else source)
+            self.state.set_clock({
+                "bpm": self.clock_manager.bpm,
+                "source": self.clock_manager.source,
+            })
+            return {"ok": True, "source": self.clock_manager.source}
+
         # --- Settings ---
         elif action == "settings.clock":
-            self.router.set_clock_source(params.get("source"))
-            self._persist()
+            # Legacy: redirect to unified clock.source
+            source = params.get("source", "internal")
+            self.clock_manager.set_source(source)
+            self.router.set_clock_source(None if source == "internal" else source)
+            self.state.set_clock({
+                "bpm": self.clock_manager.bpm,
+                "source": self.clock_manager.source,
+            })
             return {"ok": True}
 
         # --- Monitor ---
@@ -672,17 +720,11 @@ class MidiBox:
             return {"ok": path is not None, "path": path}
 
         elif action == "recorder.clock":
-            if "source" in params:
-                self.recorder.set_clock_source(params["source"])
-            if "bpm" in params:
-                self.recorder.set_bpm(float(params["bpm"]))
             if "quantize" in params:
                 self.recorder.set_quantize(params["quantize"])
             if "beats_per_bar" in params:
                 self.recorder.set_beats_per_bar(int(params["beats_per_bar"]))
             self.state.set_recorder_clock({
-                "source": self.recorder._clock_source,
-                "bpm": self.recorder._bpm,
                 "quantize": self.recorder._quantize,
                 "beats_per_bar": self.recorder._beats_per_bar,
             })
@@ -690,14 +732,19 @@ class MidiBox:
 
         # --- Launcher ---
         elif action == "launcher.clock":
-            if "mode" in params:
-                self.launcher.set_clock_mode(params["mode"])
+            # bpm changes go through the unified clock
             if "bpm" in params:
-                self.launcher.set_bpm(float(params["bpm"]))
+                bpm = float(params["bpm"])
+                self.clock_manager.set_bpm(bpm)
+                self.state.set_clock({
+                    "bpm": self.clock_manager.bpm,
+                    "source": self.clock_manager.source,
+                })
             if "quantum" in params:
                 self.launcher.set_quantum(params["quantum"])
             if "beats_per_bar" in params:
                 self.launcher.set_beats_per_bar(int(params["beats_per_bar"]))
+                self.clock_manager.set_beats_per_bar(int(params["beats_per_bar"]))
             self.state.set_launcher_state(self.launcher.save_state())
             return {"ok": True}
 
@@ -814,9 +861,13 @@ class MidiBox:
             if ok:
                 routes = self.state.get_routes()
                 self.router.load_routes(routes)
-                clock = self.state.get_clock_source()
-                self.router.set_clock_source(clock)
                 self.presets.current_preset = self.state.get_preset()
+                # Restore unified clock
+                clock = self.state.get_clock()
+                source = clock.get("source", "internal")
+                self.clock_manager.set_bpm(clock.get("bpm", 120.0))
+                self.clock_manager.set_source(source)
+                self.router.set_clock_source(None if source == "internal" else source)
             return {"ok": ok, "routes": len(self.state.get_routes()) if ok else 0}
 
         elif action == "state.reset":
@@ -847,17 +898,11 @@ class MidiBox:
             return self.looper.clear(params["slot_id"])
 
         elif action == "looper.clock":
-            if "source" in params:
-                self.looper.set_clock_source(params["source"])
-            if "bpm" in params:
-                self.looper.set_bpm(float(params["bpm"]))
             if "quantize" in params:
                 self.looper.set_quantize(params["quantize"])
             if "beats_per_bar" in params:
                 self.looper.set_beats_per_bar(int(params["beats_per_bar"]))
             self.state.set_looper_clock({
-                "source": self.looper._clock_source,
-                "bpm": self.looper._bpm,
                 "quantize": self.looper._quantize,
                 "beats_per_bar": self.looper._beats_per_bar,
             })
@@ -925,11 +970,12 @@ class MidiBox:
         # Routes
         self.bridge.state["routes"] = self.router.dump_routes()
 
-        # Mode, preset, clock
+        # Mode, preset, unified clock
         self.bridge.state["mode"] = self.mode
         self.bridge.state["preset"] = self.presets.current_preset or "default"
         self.bridge.state["current_preset"] = self.presets.current_preset or "default"
-        self.bridge.state["clock_source"] = self.router._clock_source
+        self.bridge.state["clock_source"] = self.router._clock_source  # legacy compat
+        self.bridge.state["clock"] = self.clock_manager.get_status()
 
         # Quick recorder state
         self.bridge.state["recorder"] = self.recorder.get_status()

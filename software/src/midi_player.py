@@ -16,8 +16,9 @@ UPLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "midi_files"
 
 
 class MidiPlayer:
-    def __init__(self, send_callback=None):
+    def __init__(self, send_callback=None, clock_manager=None):
         self._send_callback = send_callback  # fn(destination, mido.Message)
+        self._clock_manager = clock_manager  # for BPM display only
         self._thread: threading.Thread | None = None
         self._running = False
         self._paused = False
@@ -40,11 +41,13 @@ class MidiPlayer:
 
     @property
     def status(self) -> dict:
+        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
         return {
             "playing": self._running and not self._paused,
             "paused": self._paused,
             "loop": self._loop,
             "tempo_factor": self._tempo_factor,
+            "bpm": bpm,
             "file": self._current_file,
             "destination": self._destination,
             "position": round(self._position, 1),

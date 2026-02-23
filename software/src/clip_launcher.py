@@ -2,11 +2,12 @@
 Clip Launcher — Ableton-style session view for MIDI Box.
 
 Manages multiple layers (one per synth), each with up to 10 MIDI clip slots.
-Clips launch quantized to beat/bar boundaries, synchronized to a master clock
-(internal BPM or external MIDI clock from a device).
+Clips launch quantized to beat/bar boundaries.
+
+Clock is provided externally by ClockManager — the Launcher is a tick subscriber
+and no longer owns a clock thread or BPM value.
 """
 
-import time
 import threading
 import logging
 from enum import Enum
@@ -19,9 +20,9 @@ logger = logging.getLogger("midi-box.launcher")
 
 MIDI_FILES_DIR = Path(__file__).resolve().parent.parent / "data" / "midi_files"
 
-# Internal resolution: 96 ticks per beat (4x MIDI clock's 24 PPQ)
+# Internal resolution: 96 ticks per beat (4× MIDI clock's 24 PPQ)
 INTERNAL_PPQ = 96
-# MIDI clock emits every 4 internal ticks = standard 24 PPQ
+# MIDI clock (0xF8) emits every 4 internal ticks = standard 24 PPQ
 CLOCK_EMIT_INTERVAL = INTERNAL_PPQ // 24  # = 4
 
 MAX_CLIPS_PER_LAYER = 10
@@ -66,75 +67,43 @@ class Layer:
 
 
 class ClipLauncher:
-    def __init__(self):
+    def __init__(self, clock_manager=None):
         self.layers: list[Layer] = []
         self._send_callback = None  # fn(destination, mido.Message)
         self._output_devices_callback = None  # fn() -> list[str], for clock output
 
-        # Clock state
-        self.clock_mode = "internal"  # "internal" or "external"
-        self.bpm = 120.0
+        # Reference to the shared ClockManager (injected from main.py)
+        self._clock_manager = clock_manager
+
+        # Launcher-owned settings (BPM lives in ClockManager)
         self.beats_per_bar = 4
         self.quantum = "bar"  # "beat", "bar", "2bar", "4bar"
 
-        # Runtime clock counters
-        self._tick = 0  # absolute tick count
+        # Transport state (separate from clock — clock always ticks)
+        self._tick = 0   # last tick received from ClockManager
         self._beat = 0
         self._bar = 0
         self._transport_running = False
 
-        # Internal clock thread
-        self._clock_thread: threading.Thread | None = None
-        self._running = False
-        self._next_tick_time = 0.0
-
         self._lock = threading.Lock()
 
-        # Tick subscribers — called on each tick with (tick, beat, bar, running)
-        self._tick_subscribers: list = []
-
-        # External BPM detection (measured from incoming 0xF8 timestamps)
-        self._ext_bpm: float | None = None
-        self._last_ext_clock_time: float | None = None
-
         MIDI_FILES_DIR.mkdir(parents=True, exist_ok=True)
-
-    # ------------------------------------------------------------------
-    # Tick subscribers
-    # ------------------------------------------------------------------
-
-    def register_tick_subscriber(self, fn):
-        """Register a callback: fn(tick, beat, bar, transport_running)."""
-        if fn not in self._tick_subscribers:
-            self._tick_subscribers.append(fn)
-
-    def unregister_tick_subscriber(self, fn):
-        """Unregister a tick callback."""
-        try:
-            self._tick_subscribers.remove(fn)
-        except ValueError:
-            pass
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     def start(self):
-        """Start the internal clock thread."""
-        self._running = True
-        self._clock_thread = threading.Thread(
-            target=self._internal_clock_loop, daemon=True
-        )
-        self._clock_thread.start()
+        """Subscribe to ClockManager ticks."""
+        if self._clock_manager:
+            self._clock_manager.register_tick_subscriber(self._on_clock_tick)
         logger.info("Clip launcher started")
 
     def stop(self):
-        """Stop everything — all clips, clock thread."""
+        """Stop all clips and unsubscribe from clock."""
         self.stop_all()
-        self._running = False
-        if self._clock_thread:
-            self._clock_thread.join(timeout=2)
-            self._clock_thread = None
+        if self._clock_manager:
+            self._clock_manager.unregister_tick_subscriber(self._on_clock_tick)
         logger.info("Clip launcher stopped")
 
     # ------------------------------------------------------------------
@@ -142,76 +111,23 @@ class ClipLauncher:
     # ------------------------------------------------------------------
 
     def transport_start(self):
-        """Start transport (clock begins ticking, clips can play)."""
+        """Start transport (clips can play on next quantum boundary)."""
         with self._lock:
-            self._tick = 0
-            self._beat = 0
-            self._bar = 0
             self._transport_running = True
-            self._next_tick_time = time.perf_counter()
-        logger.info(f"Transport START — {self.bpm} BPM, {self.quantum} quantize")
+        bpm = self._clock_manager.bpm if self._clock_manager else "?"
+        logger.info(f"Transport START — {bpm} BPM, {self.quantum} quantize")
 
     def transport_stop(self):
-        """Stop transport — stop all clips, reset position."""
+        """Stop transport — stop all clips."""
         with self._lock:
             self._transport_running = False
             self._stop_all_clips()
-            self._tick = 0
-            self._beat = 0
-            self._bar = 0
         logger.info("Transport STOP")
 
-    # ------------------------------------------------------------------
-    # Clock engine
-    # ------------------------------------------------------------------
-
-    def _internal_clock_loop(self):
-        """Background thread: generate internal clock ticks at precise intervals."""
-        while self._running:
-            if not self._transport_running or self.clock_mode != "internal":
-                time.sleep(0.001)
-                continue
-
-            now = time.perf_counter()
-            if now >= self._next_tick_time:
-                tick_interval = 60.0 / (self.bpm * INTERNAL_PPQ)
-                self._next_tick_time += tick_interval
-
-                # Catch up if we fell behind
-                if self._next_tick_time < now:
-                    self._next_tick_time = now + tick_interval
-
-                self._advance_tick()
-
-            # Micro-sleep to avoid busy loop
-            time.sleep(0.0002)
-
-    def on_clock_message(self, message: mido.Message):
-        """Handle external MIDI clock messages from the router."""
-        if self.clock_mode != "external":
-            return
-
-        if message.type == "clock":
-            # Measure inter-tick interval to detect external BPM (24 PPQ = 60/(bpm*24) per tick)
-            now = time.monotonic()
-            if self._last_ext_clock_time is not None:
-                interval = now - self._last_ext_clock_time
-                if 0.001 < interval < 2.0:  # sanity: 30–60000 BPM range
-                    detected = 60.0 / (interval * 24)
-                    if self._ext_bpm is None:
-                        self._ext_bpm = detected
-                    else:
-                        # Exponential moving average (fast response, smooth output)
-                        self._ext_bpm = self._ext_bpm * 0.85 + detected * 0.15
-            self._last_ext_clock_time = now
-            # External 0xF8 = 24 PPQ, each tick = 4 internal ticks
-            for _ in range(CLOCK_EMIT_INTERVAL):
-                self._advance_tick()
-        elif message.type == "start":
+    def on_transport_message(self, message: mido.Message):
+        """Handle external MIDI transport messages (start/stop/continue)."""
+        if message.type == "start":
             with self._lock:
-                self._tick = 0
-                self._beat = 0
-                self._bar = 0
                 self._transport_running = True
             logger.info("External transport START")
         elif message.type == "stop":
@@ -224,23 +140,24 @@ class ClipLauncher:
                 self._transport_running = True
             logger.info("External transport CONTINUE")
 
-    def _advance_tick(self):
-        """Core tick handler — advance clock, process launches, advance clips."""
+    # ------------------------------------------------------------------
+    # Clock tick handler (called by ClockManager subscription)
+    # ------------------------------------------------------------------
+
+    def _on_clock_tick(self, tick: int, beat: int, bar: int, running: bool):
+        """Receive a tick from ClockManager and advance transport logic."""
         with self._lock:
+            self._tick = tick
+            self._beat = beat
+            self._bar = bar
+
             if not self._transport_running:
                 return
 
-            self._tick += 1
-
-            # Beat boundary
-            if self._tick % INTERNAL_PPQ == 0:
-                self._beat += 1
-                if self._beat >= self.beats_per_bar:
-                    self._beat = 0
-                    self._bar += 1
-
             # Emit MIDI clock (0xF8) to all output devices every 4 internal ticks
-            if self.clock_mode == "internal" and self._tick % CLOCK_EMIT_INTERVAL == 0:
+            # when running in internal mode (ClockManager owns the timing source)
+            cm_source = self._clock_manager.source if self._clock_manager else "internal"
+            if cm_source == "internal" and tick % CLOCK_EMIT_INTERVAL == 0:
                 self._emit_midi_clock()
 
             # Check quantum boundary for queued launches
@@ -251,13 +168,6 @@ class ClipLauncher:
             for layer in self.layers:
                 if layer.active_clip is not None:
                     self._advance_clip(layer)
-
-            # Notify tick subscribers
-            for sub in self._tick_subscribers:
-                try:
-                    sub(self._tick, self._beat, self._bar, self._transport_running)
-                except Exception:
-                    pass
 
     def _is_quantum_boundary(self) -> bool:
         """Check if current tick is on a quantum boundary."""
@@ -325,10 +235,6 @@ class ClipLauncher:
             # If transport not running, start immediately
             if not self._transport_running:
                 self._transport_running = True
-                self._tick = 0
-                self._beat = 0
-                self._bar = 0
-                self._next_tick_time = time.perf_counter()
                 self._process_queued_launches()
 
     def stop_layer(self, layer_id: int):
@@ -574,13 +480,10 @@ class ClipLauncher:
     # Clock configuration
     # ------------------------------------------------------------------
 
-    def set_clock_mode(self, mode: str):
-        self.clock_mode = mode
-        logger.info(f"Clock mode: {mode}")
-
     def set_bpm(self, bpm: float):
-        self.bpm = max(20.0, min(300.0, bpm))
-        logger.info(f"BPM: {self.bpm}")
+        """Delegate BPM change to ClockManager (global BPM)."""
+        if self._clock_manager:
+            self._clock_manager.set_bpm(bpm)
 
     def set_quantum(self, quantum: str):
         if quantum in ("beat", "bar", "2bar", "4bar"):
@@ -638,12 +541,11 @@ class ClipLauncher:
 
     def get_status(self) -> dict:
         """Full status for API."""
+        cm = self._clock_manager
+        bpm = cm.bpm if cm else 120.0
         with self._lock:
             return {
                 "clock": {
-                    "mode": self.clock_mode,
-                    "bpm": self.bpm,
-                    "ext_bpm": round(self._ext_bpm, 1) if self._ext_bpm else None,
                     "beats_per_bar": self.beats_per_bar,
                     "quantum": self.quantum,
                     "tick": self._tick,
@@ -656,13 +558,14 @@ class ClipLauncher:
 
     def get_poll(self) -> dict:
         """Lightweight status for UI polling."""
+        cm = self._clock_manager
+        bpm = cm.bpm if cm else 120.0
         with self._lock:
             return {
                 "tick": self._tick,
                 "beat": self._beat,
                 "bar": self._bar,
-                "bpm": self.bpm,
-                "ext_bpm": round(self._ext_bpm, 1) if self._ext_bpm else None,
+                "bpm": bpm,
                 "running": self._transport_running,
                 "layers": [
                     {
@@ -698,15 +601,11 @@ class ClipLauncher:
         }
 
     def save_state(self) -> dict:
-        """Serialize launcher config for persistence (not runtime state)."""
+        """Serialize launcher config for persistence (BPM is in unified clock state)."""
         with self._lock:
             return {
-                "clock": {
-                    "mode": self.clock_mode,
-                    "bpm": self.bpm,
-                    "beats_per_bar": self.beats_per_bar,
-                    "quantum": self.quantum,
-                },
+                "beats_per_bar": self.beats_per_bar,
+                "quantum": self.quantum,
                 "layers": [
                     {
                         "id": l.layer_id,
@@ -729,15 +628,14 @@ class ClipLauncher:
             }
 
     def load_state(self, data: dict):
-        """Restore launcher config from saved state."""
+        """Restore launcher config from saved state (BPM comes from ClockManager)."""
         if not data:
             return
 
+        # Support both old format (nested clock dict) and new flat format
         clock = data.get("clock", {})
-        self.clock_mode = clock.get("mode", "internal")
-        self.bpm = clock.get("bpm", 120.0)
-        self.beats_per_bar = clock.get("beats_per_bar", 4)
-        self.quantum = clock.get("quantum", "bar")
+        self.beats_per_bar = data.get("beats_per_bar", clock.get("beats_per_bar", 4))
+        self.quantum = data.get("quantum", clock.get("quantum", "bar"))
 
         self.layers.clear()
         for ldata in data.get("layers", []):

@@ -398,8 +398,31 @@ def create_app(bridge):
 
     @app.route("/api/settings/clock", methods=["POST"])
     def api_settings_clock():
+        # Kept for backward compat — redirects to unified clock.source
         data = request.json
-        return jsonify(_cmd("settings.clock", {"source": data.get("source")}))
+        return jsonify(_cmd("clock.source", {"source": data.get("source")}))
+
+    # ---------------------------------------------------------------
+    # API: Unified Clock
+    # ---------------------------------------------------------------
+
+    @app.route("/api/clock")
+    def api_clock():
+        """Return the unified clock state (BPM, source, ext status)."""
+        return jsonify(dict(_state().get("clock", {
+            "bpm": 120.0, "source": "internal",
+            "ext_bpm": None, "ext_clock_active": False, "ext_clock_lost": False,
+        })))
+
+    @app.route("/api/clock/bpm", methods=["POST"])
+    def api_clock_bpm():
+        data = request.json or {}
+        return jsonify(_cmd("clock.bpm", {"bpm": data.get("bpm", 120.0)}))
+
+    @app.route("/api/clock/source", methods=["POST"])
+    def api_clock_source():
+        data = request.json or {}
+        return jsonify(_cmd("clock.source", {"source": data.get("source", "internal")}))
 
     @app.route("/api/settings/rescan", methods=["POST"])
     def api_settings_rescan():
@@ -576,16 +599,18 @@ def create_app(bridge):
 
     @app.route("/api/poll")
     def api_poll():
-        """Lightweight endpoint for UI polling — returns activity + stats."""
+        """Lightweight endpoint for UI polling — returns activity + clock state."""
         st = _state()
-        launcher_poll = st.get("launcher_poll", {})
+        clock = st.get("clock", {})
         return jsonify({
             "devices": list(st.get("activity", [])),
             "mode": st.get("mode", "standalone"),
             "preset": st.get("current_preset", "default"),
-            "bpm": launcher_poll.get("bpm", 120),
-            "clock_mode": st.get("launcher", {}).get("clock", {}).get("mode", "internal"),
-            "ext_bpm": launcher_poll.get("ext_bpm"),
+            "bpm": clock.get("bpm", 120),
+            "clock_source": clock.get("source", "internal"),
+            "ext_bpm": clock.get("ext_bpm"),
+            "ext_clock_active": clock.get("ext_clock_active", False),
+            "ext_clock_lost": clock.get("ext_clock_lost", False),
         })
 
     # ---------------------------------------------------------------

@@ -8,9 +8,10 @@ call _send_midi directly and never enter the hardware input callbacks.
 Playback fires events through router.process_message so all existing
 routing rules apply — no separate destination selection needed.
 
-Supports clock-synced recording with BPM, quantization, and count-in:
-  - Clock source: standalone (own BPM), launcher (sync to clip launcher),
-    or external (MIDI clock from hardware)
+Clock is provided by ClockManager (shared system BPM).  No per-module
+BPM — all clock-dependent behaviour follows the unified system clock.
+
+Supports clock-synced recording with quantization and count-in:
   - Quantize: free, 1/16, 1/8, 1/4, bar, 2bar, 4bar
   - Count-in: waits for next quantum boundary before recording starts
   - Quantized loop length: snaps recording length to quantum boundary
@@ -79,7 +80,7 @@ def _quantum_ticks(quantize: str, beats_per_bar: int) -> int:
 class QuickRecorder:
     """Single-slot live recorder with MIDI file save/export."""
 
-    def __init__(self, recordings_dir: str = "data/recordings"):
+    def __init__(self, recordings_dir: str = "data/recordings", clock_manager=None):
         self._events: list[tuple] = []   # (offset_sec, source, mido.Message)
         self._state = "idle"
         self._length = 0.0
@@ -92,43 +93,24 @@ class QuickRecorder:
         self._recordings_dir = recordings_dir
         os.makedirs(recordings_dir, exist_ok=True)
 
-        # Clock / quantize settings
-        self._clock_source = "standalone"   # "standalone", "launcher", "external"
-        self._bpm = 120.0
+        # Quantize settings (BPM comes from ClockManager)
         self._quantize = "free"
         self._beats_per_bar = 4
-        self._launcher = None               # reference to ClipLauncher (set from main.py)
+        self._clock_manager = clock_manager  # shared ClockManager
 
-        # Clock position (updated by tick callback or standalone clock)
+        # Clock position (updated by tick callback from ClockManager)
         self._tick = 0
         self._beat = 0
         self._bar = 0
         self._transport_running = False
         self._record_start_tick = 0
 
-        # Standalone clock thread
-        self._clock_thread: Optional[threading.Thread] = None
-        self._clock_running = False
-        self._next_tick_time = 0.0
-
         # Count-in event — set when quantum boundary is reached
         self._count_in_event = threading.Event()
 
     # ------------------------------------------------------------------
-    # Clock / quantize configuration
+    # Quantize configuration
     # ------------------------------------------------------------------
-
-    def set_clock_source(self, source: str) -> None:
-        if source not in ("standalone", "launcher", "external"):
-            return
-        old = self._clock_source
-        self._clock_source = source
-        if old != source:
-            self._stop_standalone_clock()
-        logger.info(f"Recorder clock source: {source}")
-
-    def set_bpm(self, bpm: float) -> None:
-        self._bpm = max(20.0, min(300.0, bpm))
 
     def set_quantize(self, quantize: str) -> None:
         if quantize in VALID_QUANTIZE:
@@ -136,52 +118,6 @@ class QuickRecorder:
 
     def set_beats_per_bar(self, beats: int) -> None:
         self._beats_per_bar = max(1, min(16, beats))
-
-    # ------------------------------------------------------------------
-    # Standalone clock (own BPM, independent of launcher)
-    # ------------------------------------------------------------------
-
-    def _start_standalone_clock(self) -> None:
-        if self._clock_running:
-            return
-        self._clock_running = True
-        self._tick = 0
-        self._beat = 0
-        self._bar = 0
-        self._transport_running = True
-        self._next_tick_time = time.perf_counter()
-        self._clock_thread = threading.Thread(
-            target=self._standalone_clock_loop, daemon=True,
-            name="recorder-clock",
-        )
-        self._clock_thread.start()
-
-    def _stop_standalone_clock(self) -> None:
-        self._clock_running = False
-        self._transport_running = False
-        if self._clock_thread:
-            self._clock_thread.join(timeout=1)
-            self._clock_thread = None
-
-    def _standalone_clock_loop(self) -> None:
-        while self._clock_running:
-            if not self._transport_running:
-                time.sleep(0.001)
-                continue
-            now = time.perf_counter()
-            if now >= self._next_tick_time:
-                tick_interval = 60.0 / (self._bpm * INTERNAL_PPQ)
-                self._next_tick_time += tick_interval
-                if self._next_tick_time < now:
-                    self._next_tick_time = now + tick_interval
-                self._on_tick(self._tick, self._beat, self._bar, True)
-                self._tick += 1
-                if self._tick % INTERNAL_PPQ == 0:
-                    self._beat += 1
-                    if self._beat >= self._beats_per_bar:
-                        self._beat = 0
-                        self._bar += 1
-            time.sleep(0.0002)
 
     # ------------------------------------------------------------------
     # Tick callback (from launcher subscriber or standalone clock)
@@ -289,22 +225,14 @@ class QuickRecorder:
     # ------------------------------------------------------------------
 
     def _subscribe_to_clock(self) -> None:
-        """Subscribe to the appropriate clock source."""
-        if self._clock_source == "launcher" and self._launcher:
-            self._launcher.register_tick_subscriber(self._on_tick)
-            # If launcher transport isn't running, start it
-            if not self._launcher._transport_running:
-                self._launcher.transport_start()
-        elif self._clock_source == "standalone":
-            self._start_standalone_clock()
-        # external: ticks come via on_clock_message forwarded from router
+        """Subscribe to ClockManager ticks for count-in."""
+        if self._clock_manager:
+            self._clock_manager.register_tick_subscriber(self._on_tick)
 
     def _unsubscribe_from_clock(self) -> None:
-        """Unsubscribe from tick callbacks."""
-        if self._launcher:
-            self._launcher.unregister_tick_subscriber(self._on_tick)
-        if self._clock_source == "standalone":
-            self._stop_standalone_clock()
+        """Unsubscribe from ClockManager ticks."""
+        if self._clock_manager:
+            self._clock_manager.unregister_tick_subscriber(self._on_tick)
 
     def _count_in_worker(self) -> None:
         """Wait for the count-in boundary, then start recording."""
@@ -412,17 +340,7 @@ class QuickRecorder:
                 entry["channel"] = msg.channel + 1
             recent.append(entry)
 
-        # Effective BPM — from launcher if synced
-        bpm = self._bpm
-        if self._clock_source == "launcher" and self._launcher:
-            bpm = self._launcher.bpm
-
-        # Detected external BPM (from launcher's 0xF8 measurement when clock_source == external)
-        ext_bpm = None
-        if self._clock_source == "external" and self._launcher:
-            ext_bpm = self._launcher._ext_bpm
-            if ext_bpm is not None:
-                ext_bpm = round(ext_bpm, 1)
+        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
 
         return {
             "state": self._state,
@@ -430,9 +348,7 @@ class QuickRecorder:
             "event_count": len(events),
             "auto_play": self._auto_play,
             "recent_events": recent,
-            "clock_source": self._clock_source,
             "bpm": bpm,
-            "ext_bpm": ext_bpm,
             "quantize": self._quantize,
             "beats_per_bar": self._beats_per_bar,
             "beat": self._beat,
@@ -442,10 +358,10 @@ class QuickRecorder:
         }
 
     def close(self) -> None:
-        self._cancel_count_in() if self._state == "count_in" else None
+        if self._state == "count_in":
+            self._cancel_count_in()
         self._stop_playback()
         self._unsubscribe_from_clock()
-        self._stop_standalone_clock()
 
     # ------------------------------------------------------------------
     # Internal
@@ -456,9 +372,7 @@ class QuickRecorder:
 
         # Quantize the loop length if needed
         if self._quantize != "free":
-            bpm = self._bpm
-            if self._clock_source == "launcher" and self._launcher:
-                bpm = self._launcher.bpm
+            bpm = self._clock_manager.bpm if self._clock_manager else 120.0
             qt = _quantum_ticks(self._quantize, self._beats_per_bar)
             if qt > 0 and bpm > 0:
                 tick_interval = 60.0 / (bpm * INTERNAL_PPQ)

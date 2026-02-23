@@ -15,18 +15,20 @@ The MIDI Box software runs on Raspberry Pi OS Lite and handles:
 ┌─────────────────────────────────────────────────────────┐
 │                    Application Layer                     │
 │                                                          │
-│  ┌──────────┐  ┌──────────────────┐  ┌────────────────┐ │
-│  │ Web UI   │  │  Clip Launcher   │  │  MIDI Player   │ │
-│  │ (Flask)  │  │  (clip_launcher) │  │  (midi_player) │ │
-│  └────┬─────┘  └────────┬─────────┘  └───────┬────────┘ │
-│       │        ┌────────┴─────────┐           │          │
-│       │        │  Tick Subscribers │           │          │
-│       │        │  ┌─────────────┐ │           │          │
-│       │        │  │ Recorder    │ │           │          │
-│       │        │  │ Looper      │ │           │          │
-│       │        │  └─────────────┘ │           │          │
-│       │        └──────────────────┘           │          │
-│       └─────────────────┬─────────────────────┘          │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │         ClockManager (clock_manager.py)             │ │
+│  │  BPM + source (internal / device) — single truth   │ │
+│  │  96 PPQ tick loop · ext 0xF8 detection · watchdog  │ │
+│  └───┬──────────────┬──────────────┬───────────────┬──┘ │
+│      │tick          │tick          │tick           │bpm │
+│  ┌───┴──────┐  ┌────┴─────────┐  ┌┴──────────┐  ┌┴───────────────┐ │
+│  │ Launcher │  │   Recorder   │  │  Looper   │  │  MIDI Player  │ │
+│  └────┬─────┘  └──────────────┘  └───────────┘  └───────────────┘ │
+│       │                                                              │
+│  ┌────┴──────────────────────────────────────────────────────────┐  │
+│  │                    Web UI (Flask / ui_web.py)                 │  │
+│  └────┬──────────────────────────────────────────────────────────┘  │
+│       └─────────────────┬─────────────────────────────────────────  │
 │                          │                               │
 │  ┌───────────────────────┴───────────────────────────┐  │
 │  │              Routing Engine (router.py)            │  │
@@ -69,10 +71,11 @@ software/
 │   ├── hw_midi.py           ← Hardware MIDI OUT via Pi native UARTs
 │   ├── gadget.py            ← USB gadget MIDI device management
 │   ├── preset_manager.py    ← Load/save/switch routing presets
-│   ├── clip_launcher.py     ← Ableton-style clip session, 96 PPQ clock, tick subscribers
+│   ├── clock_manager.py     ← Unified BPM/clock source; tick subscribers; ext clock watchdog
+│   ├── clip_launcher.py     ← Ableton-style clip session, subscribes to ClockManager ticks
 │   ├── midi_player.py       ← MIDI file playback with tempo/loop control
-│   ├── quick_recorder.py    ← Live MIDI capture with BPM/quantize/count-in
-│   ├── midi_looper.py       ← 4-slot MIDI looper with overdub, BPM/quantize/count-in
+│   ├── quick_recorder.py    ← Live MIDI capture with quantize/count-in (syncs to ClockManager)
+│   ├── midi_looper.py       ← 4-slot MIDI looper with overdub/quantize (syncs to ClockManager)
 │   ├── midi_logger.py       ← Ring buffer MIDI monitor (thread-safe)
 │   ├── ui_web.py            ← Flask web interface + REST API
 │   ├── ipc.py               ← IPC bridge (shared state, command queue)
@@ -134,30 +137,34 @@ All pending messages per port are drained in a single `iter_pending()` call each
 - Pi appears to Mac as a class-compliant USB MIDI device
 - Bridge: Mac → gadget port → routing engine → hardware ports (and vice versa)
 
-### 6. Clip Launcher Clock
-- Internal clock thread ticks at 96 PPQ (4× MIDI standard 24 PPQ)
-- MIDI clock (0xF8) emitted every 4 internal ticks = standard 24 PPQ output
+### 6. Unified Clock (ClockManager)
+
+`ClockManager` is the single source of truth for BPM and clock source for all modules.
+
+**Internal mode** (`source == "internal"`):
+- Internal thread ticks at `60.0 / (bpm × 96)` seconds per tick = 96 PPQ
+- MIDI clock (0xF8) generated every 4 internal ticks = standard 24 PPQ output
 - Clip launches quantized to beat/bar/2bar/4bar boundaries
-- External clock mode: syncs to incoming MIDI clock from any device
 
-### 7. Clock-Synced Recording (Recorder & Looper)
-
-Both the Quick Recorder and MIDI Looper support clock-synced recording via the clip launcher's tick subscriber mechanism.
+**External mode** (`source == "<device_name>"`):
+- `main.py` receives 0xF8 from the named device and calls `clock_manager.on_midi_clock_tick()`
+- ClockManager measures inter-tick interval using exponential moving average → detects BPM
+- Advances 4 internal ticks per 0xF8 (maintains same 96 PPQ resolution)
+- Watchdog daemon thread: if no 0xF8 arrives for 2 seconds → sets `ext_clock_lost=True`, activates internal fallback clock, shows warning banner in UI
 
 **Tick Subscriber Pattern:**
 
 ```text
-ClipLauncher._advance_tick()
+ClockManager._advance_tick()
   → for each subscriber: fn(tick, beat, bar, transport_running)
-    → QuickRecorder._on_tick()   (checks for quantum boundary → starts recording)
-    → MidiLooper._on_tick()      (checks for quantum boundary → starts slot recording)
+    → ClipLauncher._on_clock_tick()  (advances transport, fires queued clips)
+    → QuickRecorder._on_tick()       (checks for quantum boundary → starts recording)
+    → MidiLooper._on_tick()          (checks for quantum boundary → starts slot recording)
 ```
 
-**Clock Sources** (configurable per system):
+### 7. Clock-Synced Recording (Recorder & Looper)
 
-- `standalone` — own clock thread (same pattern as launcher's `_internal_clock_loop`)
-- `launcher` — subscribes to launcher's tick callbacks (shared BPM/transport)
-- `external` — syncs to incoming MIDI clock from hardware
+Both the Quick Recorder and MIDI Looper subscribe to ClockManager ticks. No per-module clocks exist.
 
 **Quantize Grid** (at 96 PPQ):
 
@@ -168,7 +175,7 @@ ClipLauncher._advance_tick()
 **Count-in Flow:**
 
 1. User presses record → state becomes `count_in`
-2. Subscribe to clock (launcher ticks or start standalone clock)
+2. Subscribe to ClockManager ticks
 3. On each tick: check `tick % quantum_ticks == 0`
 4. When boundary hit: transition to `recording`, set `_record_start = time.monotonic()`
 
@@ -178,7 +185,7 @@ ClipLauncher._advance_tick()
 - Round UP to nearest quantum: `((elapsed // qt) + 1) * qt`
 - Convert back to seconds for playback loop duration
 
-**State Persistence:** Clock settings (`source`, `bpm`, `quantize`, `beats_per_bar`) saved to `state.json` under `recorder_clock` and `looper_clock` keys.
+**State Persistence:** `clock: {source, bpm}` saved globally. `recorder_clock` and `looper_clock` store only `{quantize, beats_per_bar}` — no per-module BPM/source.
 
 ### 8. Mode Detection
 ```python

@@ -19,6 +19,9 @@
         <span class="live-clock-mode" id="sidebar-clock-mode">INT</span>
         <span class="live-bpm" id="sidebar-bpm">-- <small>BPM</small></span>
       </div>
+      <div id="clock-lost-banner" class="clock-lost-banner" style="display:none;">
+        &#9888; Ext. clock lost — using internal
+      </div>
     </div>
     <ul class="sidebar-nav">
       <li><a href="#dashboard" class="active" data-page="dashboard">
@@ -67,25 +70,38 @@
     <div class="page active" id="page-dashboard">
       <div class="page-header">
         <h2>Dashboard</h2>
-        <p>System overview and device status</p>
-      </div>
-
-      <div class="grid-3" id="stats-row">
-        <div class="card stat-box">
-          <div class="stat-value" id="stat-devices">0</div>
-          <div class="stat-label">Devices</div>
-        </div>
-        <div class="card stat-box">
-          <div class="stat-value" id="stat-routes">0</div>
-          <div class="stat-label">Routes</div>
-        </div>
-        <div class="card stat-box">
-          <div class="stat-value" id="stat-messages">0</div>
-          <div class="stat-label">Messages</div>
+        <div class="dash-stat-chips">
+          <span class="stat-chip"><span id="stat-devices">0</span> devices</span>
+          <span class="stat-chip"><span id="stat-routes">0</span> routes</span>
+          <span class="stat-chip"><span id="stat-messages">0</span> msgs</span>
         </div>
       </div>
 
-      <div class="card">
+      <!-- Clock widget -->
+      <div class="grid-2 clock-modules-grid">
+        <div class="card clock-mod-card">
+          <div class="clock-mod-label">Clock Source</div>
+          <div class="clock-mod-source-row">
+            <div class="clock-mod-badge" id="clock-b-badge">INT</div>
+            <select class="clock-mod-select" data-clock-src-sync id="clock-b-source"
+                    onchange="setClockSourceAll(this.value)">
+              <option value="internal">Internal</option>
+            </select>
+          </div>
+          <div id="clock-b-lost" class="clock-lost-inline" style="display:none;">&#9888; Ext. clock stopped</div>
+        </div>
+        <div class="card clock-mod-card clock-mod-card-tempo">
+          <div class="clock-mod-label">Tempo</div>
+          <div class="clock-mod-bpm-row">
+            <button class="clock-mod-step clock-mod-step-lg" data-bpm-step id="clock-b-bpm-minus" onclick="adjustBpm(-1)">&#8722;</button>
+            <input type="number" class="clock-mod-bpm-input clock-mod-bpm-input-lg" data-bpm-sync id="clock-b-bpm"
+                   value="120" min="20" max="300" onchange="setBpm(this.value)">
+            <button class="clock-mod-step clock-mod-step-lg" data-bpm-step id="clock-b-bpm-plus" onclick="adjustBpm(1)">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:8px;">
         <div class="card-header">
           <h3>Connected Devices</h3>
           <button class="btn btn-sm" onclick="rescanDevices()">Rescan</button>
@@ -140,14 +156,15 @@
       <div class="card clock-bar">
         <div class="clock-controls">
           <div class="clock-mode">
-            <button class="tab-btn active" id="clock-int" onclick="setClockMode('internal')">INT</button>
-            <button class="tab-btn" id="clock-ext" onclick="setClockMode('external')">EXT</button>
+            <select id="launcher-clock-source" data-clock-src-sync onchange="setClockSourceAll(this.value)" style="min-width:120px;">
+              <option value="internal">Internal</option>
+            </select>
           </div>
           <button class="info-btn" onclick="showInfoPopover(this,'launcher-clock-mode')">i</button>
           <div class="clock-bpm">
-            <button class="btn btn-sm" id="launcher-bpm-minus" onclick="adjustBpm(-1)">-</button>
-            <input type="number" id="launcher-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="setBpm(this.value)">
-            <button class="btn btn-sm" id="launcher-bpm-plus" onclick="adjustBpm(1)">+</button>
+            <button class="btn btn-sm" data-bpm-step id="launcher-bpm-minus" onclick="adjustBpm(-1)">-</button>
+            <input type="number" data-bpm-sync id="launcher-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="setBpm(this.value)">
+            <button class="btn btn-sm" data-bpm-step id="launcher-bpm-plus" onclick="adjustBpm(1)">+</button>
             <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
           </div>
           <button class="info-btn" onclick="showInfoPopover(this,'launcher-bpm')">i</button>
@@ -272,7 +289,7 @@
         </div>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-2" style="align-items:start;">
         <div class="card">
           <div class="card-header"><h3>General</h3></div>
           <div class="settings-group">
@@ -287,21 +304,66 @@
             <label>Current Preset</label>
             <input type="text" id="setting-preset" readonly>
           </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header"><h3>MIDI Clock</h3></div>
-          <div class="settings-group">
-            <label>Clock Source</label>
-            <select id="setting-clock-source" onchange="setClockSource()">
-              <option value="">None</option>
-            </select>
-          </div>
-          <div class="settings-group" style="margin-top:16px;">
+          <div class="settings-group" style="margin-top:8px;">
             <button class="btn btn-accent" onclick="rescanDevices()">Rescan MIDI Devices</button>
           </div>
         </div>
+
+        <!-- Software Update -->
+        <div class="card" id="update-card">
+        <div class="card-header">
+          <h3>Software Update</h3>
+          <span id="update-version-badge" class="sys-service-badge"
+                style="background:var(--accent-dim); color:var(--accent);">
+            Loading…
+          </span>
+        </div>
+
+        <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
+          <div style="flex:1; min-width:180px;">
+            <div class="settings-group" style="margin-bottom:8px;">
+              <label>Current Version</label>
+              <input type="text" id="update-current-version" readonly value="—">
+            </div>
+            <div class="settings-group">
+              <label>Latest Version</label>
+              <input type="text" id="update-latest-version" readonly value="—">
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:6px;"
+                 id="update-last-checked"></div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:8px; min-width:180px;">
+            <div id="update-type-info"
+                 style="font-size:12px; color:var(--text-muted); min-height:16px;"></div>
+            <div class="btn-group">
+              <button class="btn" onclick="checkForUpdates()" id="update-check-btn">
+                Check Now
+              </button>
+              <button class="btn btn-accent" onclick="triggerUpdate()" id="update-trigger-btn"
+                      style="display:none;">
+                Install Update
+              </button>
+            </div>
+            <div id="update-error-msg"
+                 style="font-size:11px; color:var(--danger); min-height:14px;"></div>
+          </div>
+        </div>
+
+        <div id="update-progress-wrap" style="display:none; margin-top:16px;">
+          <div style="font-size:11px; font-weight:700; color:var(--text-secondary);
+                      letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">
+            Update Log
+          </div>
+          <div id="update-log"
+               style="background:var(--bg-primary); border:1px solid var(--border);
+                      border-radius:6px; padding:10px; font-size:11px;
+                      font-family:monospace; max-height:200px; overflow-y:auto;
+                      color:var(--text-secondary); white-space:pre-wrap; line-height:1.6;">
+          </div>
+        </div>
       </div>
+      </div><!-- end grid-2 -->
 
       <div class="card" style="margin-top:8px;">
         <div class="card-header">
@@ -394,61 +456,6 @@
           <button class="btn btn-danger" onclick="resetState()">Reset to Defaults</button>
         </div>
 
-        <!-- Software Update -->
-        <div class="card" id="update-card">
-          <div class="card-header">
-            <h3>Software Update</h3>
-            <span id="update-version-badge" class="sys-service-badge"
-                  style="background:var(--accent-dim); color:var(--accent);">
-              Loading…
-            </span>
-          </div>
-
-          <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start;">
-            <div style="flex:1; min-width:180px;">
-              <div class="settings-group" style="margin-bottom:8px;">
-                <label>Current Version</label>
-                <input type="text" id="update-current-version" readonly value="—">
-              </div>
-              <div class="settings-group">
-                <label>Latest Version</label>
-                <input type="text" id="update-latest-version" readonly value="—">
-              </div>
-              <div style="font-size:11px; color:var(--text-muted); margin-top:6px;"
-                   id="update-last-checked"></div>
-            </div>
-
-            <div style="display:flex; flex-direction:column; gap:8px; min-width:180px;">
-              <div id="update-type-info"
-                   style="font-size:12px; color:var(--text-muted); min-height:16px;"></div>
-              <div class="btn-group">
-                <button class="btn" onclick="checkForUpdates()" id="update-check-btn">
-                  Check Now
-                </button>
-                <button class="btn btn-accent" onclick="triggerUpdate()" id="update-trigger-btn"
-                        style="display:none;">
-                  Install Update
-                </button>
-              </div>
-              <div id="update-error-msg"
-                   style="font-size:11px; color:var(--danger); min-height:14px;"></div>
-            </div>
-          </div>
-
-          <div id="update-progress-wrap" style="display:none; margin-top:16px;">
-            <div style="font-size:11px; font-weight:700; color:var(--text-secondary);
-                        letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">
-              Update Log
-            </div>
-            <div id="update-log"
-                 style="background:var(--bg-primary); border:1px solid var(--border);
-                        border-radius:6px; padding:10px; font-size:11px;
-                        font-family:monospace; max-height:200px; overflow-y:auto;
-                        color:var(--text-secondary); white-space:pre-wrap; line-height:1.6;">
-            </div>
-          </div>
-        </div>
-
       </div>
     </div>
 
@@ -489,8 +496,11 @@
               <span id="player-tempo-val">100%</span>
             </label>
           </div>
-          <div class="player-status" id="player-status" style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-            Stopped
+          <div style="display:flex; align-items:center; gap:16px; margin-top:8px;">
+            <div class="player-status" id="player-status" style="font-size:12px; color:var(--text-muted); flex:1;">
+              Stopped
+            </div>
+            <span id="player-bpm" style="font-size:12px; font-weight:600; color:var(--accent);"></span>
           </div>
         </div>
       </div>
@@ -513,18 +523,7 @@
       <!-- Clock Bar -->
       <div class="card clock-bar">
         <div class="clock-controls">
-          <div class="clock-mode">
-            <button class="tab-btn active" id="rec-clock-standalone" onclick="recSetClockSource('standalone')">INTERNAL</button>
-            <button class="tab-btn" id="rec-clock-launcher" onclick="recSetClockSource('launcher')">SYNC</button>
-            <button class="tab-btn" id="rec-clock-ext" onclick="recSetClockSource('external')">EXT</button>
-          </div>
-          <button class="info-btn" onclick="showInfoPopover(this,'rec-clock-mode')">i</button>
-          <div class="clock-bpm">
-            <button class="btn btn-sm" id="rec-bpm-minus" onclick="recAdjustBpm(-1)">-</button>
-            <input type="number" id="rec-bpm" value="120" min="20" max="300" style="width:60px; text-align:center;" onchange="recSetBpm(this.value)">
-            <button class="btn btn-sm" id="rec-bpm-plus" onclick="recAdjustBpm(1)">+</button>
-            <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
-          </div>
+          <div class="rec-bpm-display" id="rec-bpm-display" style="font-size:14px;font-weight:600;color:var(--accent);min-width:70px;">120 BPM</div>
           <div class="clock-quantum">
             <select id="rec-quantize" onchange="recSetQuantize(this.value)">
               <option value="free">Free</option>
@@ -547,12 +546,6 @@
             </span>
           </div>
         </div>
-      </div>
-
-      <!-- Clock Source Context Panel -->
-      <div class="clock-source-panel standalone" id="rec-clock-panel">
-        <span class="csp-icon" id="rec-csp-icon">⊙</span>
-        <span id="rec-csp-text">Own clock — set tempo with BPM above</span>
       </div>
 
       <!-- Transport card -->

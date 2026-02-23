@@ -115,6 +115,283 @@ body {
   line-height: 1;
 }
 
+.clock-lost-banner {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--warning, #f0a030);
+  background: rgba(240, 160, 48, 0.12);
+  border: 1px solid rgba(240, 160, 48, 0.3);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* Inline clock-lost warning (inside dashboard cards) */
+.clock-lost-inline {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning, #f0a030);
+}
+
+/* Dashboard stat chips (replaces big stat boxes) */
+.dash-stat-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.stat-chip {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+/* Clock design label */
+.clock-design-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  margin-top: 4px;
+}
+
+/* ======== Design B — Split Modules ======== */
+.clock-modules-grid {
+  gap: 12px;
+}
+
+.clock-mod-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clock-mod-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.clock-mod-badge {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--accent);
+  padding: 4px 14px;
+  border-radius: var(--radius);
+  background: rgba(0, 180, 120, 0.1);
+  border: 1px solid rgba(0, 180, 120, 0.25);
+  align-self: flex-start;
+}
+
+.clock-mod-badge-ext {
+  color: #f0a030;
+  background: rgba(240, 160, 48, 0.1);
+  border-color: rgba(240, 160, 48, 0.25);
+}
+
+/* Source row: badge + select side by side */
+.clock-mod-source-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.clock-mod-source-row .clock-mod-select {
+  flex: 1;
+}
+
+.clock-mod-select {
+  width: 100%;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.clock-mod-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Tempo card: vertically + horizontally center content */
+.clock-mod-card-tempo {
+  align-items: center;
+  justify-content: center;
+}
+
+.clock-mod-bpm-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.clock-mod-step {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  font-weight: 700;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.clock-mod-step:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+/* Large step buttons for tempo card */
+.clock-mod-step-lg {
+  width: 54px;
+  height: 54px;
+  font-size: 26px;
+}
+
+.clock-mod-bpm-input {
+  width: 80px;
+  text-align: center;
+  font-size: 38px;
+  font-weight: 700;
+  font-family: monospace;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  padding: 4px 0;
+  -moz-appearance: textfield;
+}
+
+/* Bigger BPM for tempo card */
+.clock-mod-bpm-input-lg {
+  font-size: 52px;
+  width: 100px;
+}
+
+.clock-mod-bpm-input::-webkit-outer-spin-button,
+.clock-mod-bpm-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+
+/* ======== Design C — Transport Bar ======== */
+.clock-transport-card {
+  padding: 16px 20px;
+}
+
+.clock-transport-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.clock-chips {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.clock-chip {
+  padding: 5px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  line-height: 1.4;
+}
+
+.clock-chip.active {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.clock-chip-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 16px;
+}
+
+.clock-bpm-display-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.clock-bpm-num {
+  font-size: 54px;
+  font-weight: 700;
+  font-family: monospace;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.clock-bpm-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+.clock-c-steps {
+  display: flex;
+  gap: 6px;
+}
+
+.clock-step-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  font-weight: 700;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clock-step-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+.clock-bpm-slider {
+  width: 100%;
+  margin-top: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .live-bpm small {
   font-size: 9px;
   font-weight: 400;
@@ -708,13 +985,22 @@ body {
 }
 
 .clock-quantum select,
-.clock-timesig select {
+.clock-timesig select,
+.clock-mode select {
   background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 4px 8px;
+  padding: 6px 10px;
   font-size: 12px;
+  min-width: 140px;
+}
+
+.clock-mode select:focus,
+.clock-quantum select:focus,
+.clock-timesig select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .beat-display {
