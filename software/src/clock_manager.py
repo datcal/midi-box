@@ -23,6 +23,7 @@ BPM subscribers receive: fn(bpm)
 import time
 import threading
 import logging
+from collections import deque
 
 logger = logging.getLogger("midi-box.clock")
 
@@ -58,7 +59,8 @@ class ClockManager:
 
         # External clock state
         self._ext_last_tick: float | None = None   # time.monotonic() of last 0xF8
-        self._ext_bpm: float | None = None          # EMA-smoothed detected BPM
+        self._ext_bpm: float | None = None          # detected BPM (circular buffer avg)
+        self._ext_tick_times: deque = deque(maxlen=24)  # last 24 tick timestamps
         self._ext_clock_active: bool = False        # receiving ticks right now
         self._ext_clock_lost: bool = False          # source≠internal & no ticks
 
@@ -117,6 +119,7 @@ class ClockManager:
             # Reset external state
             self._ext_last_tick = None
             self._ext_bpm = None
+            self._ext_tick_times.clear()
             self._ext_clock_active = False
             self._ext_clock_lost = False
             # Stop fallback; internal loop will pick up from here
@@ -199,19 +202,18 @@ class ClockManager:
         now = time.monotonic()
 
         with self._lock:
-            # Detect BPM from inter-tick interval
-            if self._ext_last_tick is not None:
-                interval = now - self._ext_last_tick
-                if 0.001 < interval < 2.0:
-                    detected = 60.0 / (interval * 24)  # 24 PPQ
-                    if self._ext_bpm is None:
-                        self._ext_bpm = detected
-                    else:
-                        # Exponential moving average (fast response, smooth output)
-                        self._ext_bpm = self._ext_bpm * 0.15 + detected * 0.85
+            # Accumulate timestamps; compute BPM as average over the full buffer window.
+            # This smooths out USB jitter without per-interval EMA instability.
+            self._ext_tick_times.append(now)
+            n = len(self._ext_tick_times)
+            if n >= 4:
+                span = self._ext_tick_times[-1] - self._ext_tick_times[0]
+                if span > 0:
+                    # (n-1) intervals span from first to last timestamp
+                    self._ext_bpm = 60.0 * (n - 1) / (span * 24)
 
             was_lost = self._ext_clock_lost
-            self._ext_last_tick = now
+            self._ext_last_tick = now   # kept for watchdog timeout detection
             self._ext_clock_active = True
             self._ext_clock_lost = False
             self._fallback_active = False   # stop any running fallback
@@ -337,6 +339,8 @@ class ClockManager:
                     self._ext_clock_lost = True
                     self._fallback_active = True
                     self._next_tick_time = time.perf_counter()
+                    self._ext_tick_times.clear()
+                    self._ext_bpm = None
                 logger.warning(
                     f"External clock lost (source: {source!r}) — "
                     f"falling back to internal at {self._bpm:.0f} BPM"
