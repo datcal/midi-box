@@ -138,16 +138,34 @@ class MidiRouter:
         # Record activity
         self._record_activity(source_name, message.type, is_input=True)
 
-        # Clock gating: only forward clock from the designated source.
-        # Clock distribution to all outputs is handled by ClockManager's
-        # _midi_clock_callback (broadcast), not by per-device routes.
+        # Clock / transport gating.
+        #
+        # MIDI clock (0xF8) is never routed through the per-device table;
+        # ClockManager broadcasts it to all outputs at 24 PPQ.
+        #
+        # Transport messages (start/stop/continue) from the designated clock
+        # source go to ClockManager for broadcast AND then fall through to the
+        # routing table so that explicit routes (e.g. SP-404 → KeyStep) can
+        # also forward them.  Transport from non-clock-source devices (when an
+        # external clock source is selected) is dropped to avoid conflicts.
         if message.type in ("clock", "start", "stop", "continue", "songpos"):
+            if message.type == "clock":
+                # Raw clock tick: deliver to ClockManager only, never route.
+                if self._clock_callback:
+                    self._clock_callback(message)
+                return
+
+            # Transport (start/stop/continue/songpos):
+            # Drop if an external clock source is set and this isn't it.
             if self._clock_source and source_name != self._clock_source:
                 return
-            # Deliver to ClockManager / Launcher, then stop — don't route through table.
-            if self._clock_callback and message.type in ("clock", "start", "stop", "continue"):
+
+            # Deliver to ClockManager/Launcher for system-wide broadcast.
+            if self._clock_callback and message.type in ("start", "stop", "continue"):
                 self._clock_callback(message)
-            return
+
+            # Then fall through to the routing table so explicit per-device
+            # routes (e.g. SP-404 → KeyStep) also receive the transport message.
 
         # O(1) source lookup — index rebuilt atomically on route changes
         routes_for_source = self._routes_by_source.get(source_name)

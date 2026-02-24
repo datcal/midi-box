@@ -67,11 +67,17 @@ class AlsaMidi:
         ]
 
         def _port_sort_key(name):
-            # Prefer standard MIDI ports over DAW/control-surface ports.
-            # This ensures the MIDI port registers first when a device exposes
-            # multiple ports (e.g. KeyLab mkII 88 MIDI vs KeyLab mkII 88 DAW).
+            # Prefer the standard MIDI port when a device exposes multiple ports.
+            # Ports whose names contain these keywords are secondary/non-MIDI ports
+            # and must register AFTER the main MIDI port so that the duplicate-
+            # detection logic in register_usb_device keeps the right one.
+            #
+            # Known multi-port devices:
+            #   KeyLab mkII 88 → "MIDI" + "DAW"
+            #   Roland SP-404 MK2 → "MIDI 1" + "DIN SYNC"  (D<M alphabetically,
+            #                        so without this fix the sync port wins)
             lower = name.lower()
-            for kw in (" daw", " control"):
+            for kw in (" daw", " control", " din", " sync"):
                 if kw in lower:
                     return (1, name)
             return (0, name)
