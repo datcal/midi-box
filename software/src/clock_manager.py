@@ -288,32 +288,34 @@ class ClockManager:
             pass
 
         while self._running:
-            with self._lock:
-                active = (self._source == "internal") or self._fallback_active
-                bpm = self._bpm
-
-            if not active:
-                time.sleep(0.001)
-                continue
-
             now = time.perf_counter()
             if now >= self._next_tick_time:
+                # Tick boundary: read shared state under lock.
+                # This runs at most INTERNAL_PPQ × BPM/60 times per second
+                # (e.g. 192×/s at 120 BPM) — not on every spin iteration.
+                with self._lock:
+                    active = (self._source == "internal") or self._fallback_active
+                    bpm = self._bpm
+
+                if not active:
+                    time.sleep(0.001)
+                    continue
+
                 tick_interval = 60.0 / (bpm * INTERNAL_PPQ)
                 self._next_tick_time += tick_interval
-                # Catch up if we fell behind (e.g., after source switch)
+                # Catch up if we fell behind (e.g. after source switch or long sleep)
                 if self._next_tick_time < now:
                     self._next_tick_time = now + tick_interval
                 self._advance_tick()
             else:
-                # Adaptive sleep: coarse sleep until ~1 ms before the next tick,
-                # then spin (no sleep) for the final stretch.  This trades a tiny
-                # amount of CPU for dramatically tighter tick timing — which stops
-                # the JP-08 (and other synths with PLL-based clock recovery) from
-                # drifting when the incoming MIDI clock has high jitter.
                 remaining = self._next_tick_time - now
-                if remaining > 0.002:
+                if remaining > 0.001:
+                    # Coarse sleep: wake up ~1 ms before the tick boundary.
+                    # No lock held — source-change detection happens on the next
+                    # tick boundary (≤ one tick interval away, ≤ 5 ms at 120 BPM).
                     time.sleep(remaining - 0.001)
-                # else: busy-wait (fall through to the top of the loop immediately)
+                # else: pure busy-wait — tight loop on perf_counter() only,
+                # no lock, no sleep; fires within ~50 µs of target on SCHED_FIFO.
 
     def _advance_tick(self) -> None:
         """Increment absolute tick counter and notify subscribers."""
@@ -329,17 +331,19 @@ class ClockManager:
             bar = self._bar
             is_internal = (self._source == "internal") or self._fallback_active
 
-        for sub in list(self._tick_subs):
-            try:
-                sub(tick, beat, bar, True)
-            except Exception:
-                pass
-
-        # Generate MIDI clock output for internal source (every 4 ticks = 24 PPQ).
-        # External source is handled directly in on_midi_clock_tick.
+        # Send MIDI clock (0xF8) to hardware FIRST — before any subscriber callbacks.
+        # Subscribers (launcher, recorder, looper) are not microsecond-sensitive;
+        # the USB write latency is.  Putting the hardware send here means only the
+        # lock-release above separates "tick decision" from "ALSA write".
         if is_internal and tick % CLOCK_TICKS_PER_MIDI == 0 and self._midi_clock_callback:
             try:
                 self._midi_clock_callback()
+            except Exception:
+                pass
+
+        for sub in list(self._tick_subs):
+            try:
+                sub(tick, beat, bar, True)
             except Exception:
                 pass
 
