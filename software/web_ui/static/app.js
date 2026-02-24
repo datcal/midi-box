@@ -96,7 +96,7 @@ async function api(path, opts = {}, timeoutMs = 6000) {
       ...opts,
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
-    return resp.json();
+    return await resp.json();
   } catch (e) {
     return {};
   } finally {
