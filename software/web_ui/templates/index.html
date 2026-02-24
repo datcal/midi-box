@@ -291,20 +291,17 @@
 
       <div class="grid-2" style="align-items:start;">
         <div class="card">
-          <div class="card-header"><h3>General</h3></div>
-          <div class="settings-group">
-            <label>Platform</label>
-            <input type="text" id="setting-platform" readonly>
+          <div class="card-header">
+            <h3>Network MIDI (RTP-MIDI)</h3>
+            <span id="rtpmidi-badge" class="sys-service-badge">—</span>
           </div>
-          <div class="settings-group">
-            <label>Mode</label>
-            <input type="text" id="setting-mode" readonly>
-          </div>
-          <div class="settings-group">
-            <label>Current Preset</label>
-            <input type="text" id="setting-preset" readonly>
-          </div>
-          <div class="settings-group" style="margin-top:8px;">
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.6;">
+            Appears as <strong>MIDI Box</strong> in macOS <em>Audio MIDI Setup → Window → MIDI Studio → Network</em>.
+            On iOS open a Core MIDI app and select the network session.<br>
+            Bonjour auto-discovery requires <code>pip install zeroconf</code>; without it add the Pi's IP manually.
+          </p>
+          <div id="rtpmidi-sessions" style="font-size:12px; color:var(--text-muted);">Loading…</div>
+          <div class="settings-group" style="margin-top:12px;">
             <button class="btn btn-accent" onclick="rescanDevices()">Rescan MIDI Devices</button>
           </div>
         </div>
@@ -421,19 +418,6 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:8px;">
-        <div class="card-header">
-          <h3>Network MIDI (RTP-MIDI)</h3>
-          <span id="rtpmidi-badge" class="sys-service-badge">—</span>
-        </div>
-        <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.6;">
-          Appears as <strong>MIDI Box</strong> in macOS <em>Audio MIDI Setup → Window → MIDI Studio → Network</em>.
-          On iOS open a Core MIDI app and select the network session.<br>
-          Bonjour auto-discovery requires <code>pip install zeroconf</code>; without it add the Pi's IP manually.
-        </p>
-        <div id="rtpmidi-sessions" style="font-size:12px; color:var(--text-muted);">Loading…</div>
-      </div>
-
       <div class="grid-2" style="margin-top:8px;">
         <div class="card">
           <div class="card-header"><h3>Export / Import</h3></div>
@@ -470,10 +454,10 @@
       <div class="card clock-bar" id="player-clock-bar">
         <div class="clock-controls">
           <div class="clock-bpm">
-            <button class="btn btn-sm" data-bpm-step onclick="adjustBpm(-1)">-</button>
-            <input type="number" data-bpm-sync id="player-bpm" value="120" min="20" max="300"
-                   style="width:60px; text-align:center;" onchange="setBpm(this.value)">
-            <button class="btn btn-sm" data-bpm-step onclick="adjustBpm(1)">+</button>
+            <button class="btn btn-sm" onclick="playerAdjustBpm(-1)">-</button>
+            <input type="number" id="player-bpm" value="120" min="20" max="300"
+                   style="width:60px; text-align:center;" onchange="playerSetBpm(this.value)">
+            <button class="btn btn-sm" onclick="playerAdjustBpm(1)">+</button>
             <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
           </div>
           <div class="player-destination">

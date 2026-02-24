@@ -82,13 +82,12 @@ class MidiPlayer:
 
     @property
     def status(self) -> dict:
-        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
         return {
             "playing": self._running and not self._paused,
             "paused": self._paused,
             "loop": self._loop,
             "tempo_factor": self._tempo_factor,
-            "bpm": bpm,
+            "bpm": round(self._tempo_factor * 120.0),
             "file": self._current_file,
             "folder": self._current_folder,
             "destination": self._destination,

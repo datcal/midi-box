@@ -1161,6 +1161,21 @@ let playerInterval = null;
 let playerCurrentFolder = null;   // null = root, string = subfolder name
 let playerDestination = null;
 let playerCurrentStatus = {};
+let _playerBpm = 120;  // player-local BPM (120 = tempo_factor 1.0)
+
+async function playerAdjustBpm(delta) {
+  const bpm = Math.max(20, Math.min(300, _playerBpm + delta));
+  _playerBpm = bpm;
+  const el = document.getElementById('player-bpm');
+  if (el && !el.matches(':focus')) el.value = bpm;
+  await api('/player/tempo', { method: 'POST', body: { tempo: bpm / 120.0 } });
+}
+
+async function playerSetBpm(val) {
+  const bpm = Math.max(20, Math.min(300, parseFloat(val) || 120));
+  _playerBpm = bpm;
+  await api('/player/tempo', { method: 'POST', body: { tempo: bpm / 120.0 } });
+}
 
 async function loadPlayer() {
   const [playerData, devData] = await Promise.all([
@@ -1408,7 +1423,7 @@ async function playerPlayFile(name, folder) {
 
   await api('/player/play', {
     method: 'POST',
-    body: { file: name, folder, destination: dest, loop, tempo: 1.0 },
+    body: { file: name, folder, destination: dest, loop, tempo: _playerBpm / 120.0 },
   });
 
   // Optimistic update
@@ -1438,6 +1453,13 @@ async function pollPlayerStatus() {
   const prevFolder = playerCurrentStatus.folder;
   const prevPlaying = playerCurrentStatus.playing || playerCurrentStatus.paused;
   playerCurrentStatus = status;
+
+  // Sync player-local BPM display from status
+  if (status.bpm) {
+    _playerBpm = status.bpm;
+    const bpmEl = document.getElementById('player-bpm');
+    if (bpmEl && !bpmEl.matches(':focus')) bpmEl.value = Math.round(status.bpm);
+  }
 
   updatePlayerStatusBadge(status);
 
