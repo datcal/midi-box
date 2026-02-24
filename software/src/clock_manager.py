@@ -20,6 +20,7 @@ Tick subscribers receive: fn(tick, beat, bar, running=True)
 BPM subscribers receive: fn(bpm)
 """
 
+import os
 import time
 import threading
 import logging
@@ -275,6 +276,17 @@ class ClockManager:
 
     def _internal_clock_loop(self) -> None:
         """Background thread: tick at the configured BPM using internal timer."""
+        # Elevate this thread to real-time scheduling so the OS cannot preempt it
+        # for multiple milliseconds mid-tick.  Requires the same LimitRTPRIO=70
+        # systemd setting used by the main thread.  Falls back silently on macOS or
+        # when running without the right privileges.
+        try:
+            param = os.sched_param(sched_priority=60)
+            os.sched_setscheduler(0, os.SCHED_FIFO, param)
+            logger.debug("Clock thread: SCHED_FIFO priority 60")
+        except Exception:
+            pass
+
         while self._running:
             with self._lock:
                 active = (self._source == "internal") or self._fallback_active
@@ -292,8 +304,16 @@ class ClockManager:
                 if self._next_tick_time < now:
                     self._next_tick_time = now + tick_interval
                 self._advance_tick()
-
-            time.sleep(0.0002)
+            else:
+                # Adaptive sleep: coarse sleep until ~1 ms before the next tick,
+                # then spin (no sleep) for the final stretch.  This trades a tiny
+                # amount of CPU for dramatically tighter tick timing — which stops
+                # the JP-08 (and other synths with PLL-based clock recovery) from
+                # drifting when the incoming MIDI clock has high jitter.
+                remaining = self._next_tick_time - now
+                if remaining > 0.002:
+                    time.sleep(remaining - 0.001)
+                # else: busy-wait (fall through to the top of the loop immediately)
 
     def _advance_tick(self) -> None:
         """Increment absolute tick counter and notify subscribers."""

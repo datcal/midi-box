@@ -24,6 +24,14 @@ import multiprocessing
 
 import mido
 
+# Message types that must never appear in the MIDI monitor ring buffer.
+# Clock (0xF8) fires 24 times per beat — logging it would flood the 500-entry
+# buffer in under a second and add lock-acquisition overhead on the hot path.
+_TRANSPORT_TYPES = frozenset(("clock", "start", "stop", "continue", "songpos"))
+
+# Pre-allocated clock message — reused on every tick to avoid GC churn.
+_CLOCK_MSG = mido.Message("clock")
+
 from device_registry import DeviceRegistry
 from alsa_midi import AlsaMidi
 from router import MidiRouter
@@ -100,6 +108,10 @@ class MidiBox:
         self._web_process = None
         self.bridge = None
         self._performance_mode = False
+        # Cached list of output device names for the clock broadcast loop.
+        # Rebuilt once at startup and invalidated on hotplug events instead of
+        # being recomputed from scratch on every 24-PPQ tick.
+        self._clock_output_names: list[str] = []
         self._verbose = getattr(args, "verbose", False)
         self.recorder = QuickRecorder(recordings_dir="data/recordings",
                                       clock_manager=self.clock_manager)
@@ -177,6 +189,9 @@ class MidiBox:
         print()
         print(self.router.status())
         print()
+
+        # Build the clock output device cache before the clock thread starts ticking.
+        self._refresh_clock_outputs()
 
         # Start ClockManager (tick engine) then Launcher (tick subscriber)
         self.clock_manager.start()
@@ -499,7 +514,7 @@ class MidiBox:
             # Read from USB gadget (Mac → Pi in DAW mode; different mechanism from rtmidi)
             if self.gadget and self.mode == "daw":
                 for msg in self.gadget.receive_from_host():
-                    if not self._performance_mode:
+                    if not self._performance_mode and msg.type not in _TRANSPORT_TYPES:
                         self.midi_logger.log_input("Logic Pro", msg)
                     self.router.process_message("Logic Pro", msg)
 
@@ -1067,7 +1082,9 @@ class MidiBox:
         # Ignore messages from output-only devices (e.g. synths sending unsolicited clock)
         if device and device.direction == "out":
             return
-        if not self._performance_mode:
+        # Clock/transport messages are too frequent to log — they flood the monitor
+        # ring buffer and add lock overhead on the hot receive path.
+        if not self._performance_mode and message.type not in _TRANSPORT_TYPES:
             self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
         self.recorder.on_midi_message(source_name, message)
@@ -1108,7 +1125,7 @@ class MidiBox:
         # Send to WiFi peers via RTP-MIDI
         if destination == "RTP-MIDI (WiFi)" and self.rtp_midi:
             ok = self.rtp_midi.send(message)
-            if ok and not self._performance_mode:
+            if ok and not self._performance_mode and message.type not in _TRANSPORT_TYPES:
                 self.midi_logger.log_output(destination, message)
             return ok
 
@@ -1116,7 +1133,7 @@ class MidiBox:
         if destination in ("Logic Pro", "Mac"):
             if self.gadget:
                 ok = self.gadget.send_to_host(message)
-                if ok and not self._performance_mode:
+                if ok and not self._performance_mode and message.type not in _TRANSPORT_TYPES:
                     self.midi_logger.log_output(destination, message)
                 return ok
             return False
@@ -1143,20 +1160,23 @@ class MidiBox:
         elif device.port_type == "hardware" and self.hw:
             ok = self.hw.send(device.name, message)
 
-        if ok and not self._performance_mode:
+        if ok and not self._performance_mode and message.type not in _TRANSPORT_TYPES:
             self.midi_logger.log_output(destination, message)
         return ok
 
     def _send_clock_to_outputs(self) -> None:
         """Send MIDI clock (0xF8) to every connected output device.
         Called at 24 PPQ by ClockManager for both internal and external sources.
-        The clock source device itself is skipped to avoid echo."""
+        The clock source device itself is skipped to avoid echo.
+        Uses pre-cached device list and message object to keep the hot path lean."""
         clock_source = self.clock_manager.source
-        msg = mido.Message("clock")
-        for dev in self.registry.get_output_devices():
-            if dev.name == clock_source:
-                continue
-            self._send_midi(dev.name, msg)
+        for name in self._clock_output_names:
+            if name != clock_source:
+                self._send_midi(name, _CLOCK_MSG)
+
+    def _refresh_clock_outputs(self) -> None:
+        """Rebuild the cached output device name list. Called at startup and on hotplug."""
+        self._clock_output_names = [d.name for d in self.registry.get_output_devices()]
 
     def _send_transport_to_outputs(self, message) -> None:
         """Broadcast a start/stop/continue message to all output devices."""
@@ -1181,7 +1201,7 @@ class MidiBox:
         device = self.registry.get_device(port_name)
         if device and device.direction == "out":
             return
-        if not self._performance_mode:
+        if not self._performance_mode and message.type not in _TRANSPORT_TYPES:
             self.midi_logger.log_input(port_name, message)
         self.looper.on_midi_message(port_name, message)
         self.recorder.on_midi_message(port_name, message)
@@ -1190,7 +1210,7 @@ class MidiBox:
     def _on_rtpmidi_received(self, message):
         """Called from the RTP-MIDI server thread when a WiFi MIDI message arrives."""
         source_name = "RTP-MIDI (WiFi)"
-        if not self._performance_mode:
+        if not self._performance_mode and message.type not in _TRANSPORT_TYPES:
             self.midi_logger.log_input(source_name, message)
         self.looper.on_midi_message(source_name, message)
         self.recorder.on_midi_message(source_name, message)
@@ -1205,6 +1225,7 @@ class MidiBox:
         device = self.registry.register_usb_device(port.port_name, port_name)
         if device:
             logger.info(f"Hotplug: {device.name} connected (port: {port_name})")
+            self._refresh_clock_outputs()
 
     def _on_usb_device_disconnected(self, port_name: str):
         device = self.registry.find_by_port_id(port_name)
@@ -1214,6 +1235,7 @@ class MidiBox:
         else:
             self.registry.unregister_device(port_name)
             logger.info(f"Hotplug: {port_name} disconnected")
+        self._refresh_clock_outputs()
 
 
 # ---------------------------------------------------------------------------
