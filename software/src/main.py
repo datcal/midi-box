@@ -610,6 +610,12 @@ class MidiBox:
                 "midi_channel": dev.midi_channel,
             })
             self.registry.set_device_overrides(self.state.get_device_overrides())
+            # Save display name if provided
+            display_name = params.get("display_name", "").strip()
+            if display_name and display_name != name:
+                self.state.set_device_display_name(name, display_name)
+            else:
+                self.state.remove_device_display_name(name)
             return {"ok": True}
 
         elif action == "device.rescan":
@@ -775,10 +781,13 @@ class MidiBox:
 
         elif action == "launcher.start":
             self.launcher.transport_start()
+            self.clock_manager.on_transport_reset()
+            self._send_transport_to_outputs(mido.Message("start"))
             return {"ok": True}
 
         elif action == "launcher.stop":
             self.launcher.transport_stop()
+            self._send_transport_to_outputs(mido.Message("stop"))
             return {"ok": True}
 
         elif action == "launcher.add_layer":
@@ -1056,6 +1065,14 @@ class MidiBox:
 
         # Looper
         self.bridge.state["looper"] = self.looper.get_status()
+
+        # Device onboarding: which devices have no user-configured overrides yet
+        overrides = self.state.get_device_overrides()
+        self.bridge.state["unconfigured_devices"] = [
+            name for name in self.registry.get_all_devices()
+            if name not in overrides
+        ]
+        self.bridge.state["device_display_names"] = self.state.get_device_display_names()
 
         # RTP-MIDI
         self.bridge.state["rtp_midi"] = {

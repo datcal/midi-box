@@ -51,6 +51,13 @@ usb_devices:
     ports: 1
     default_channel: 10
 
+  # Roland TR-8S  (lsusb: 0582:020a)
+  "0582:020a":
+    name: "TR-8S"
+    type: drum_machine
+    ports: 2
+    default_channel: 10
+
 
 # Hardware ports (SC16IS752 UARTs + Pi native UART)
 # Keys are the serial device basename (e.g., ttySC0)

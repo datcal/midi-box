@@ -115,6 +115,8 @@ async function loadDashboard() {
   ]);
 
   devices = devData.devices;
+  window._deviceDisplayNames = devData.device_display_names || {};
+  window._unconfiguredDevices = devData.unconfigured_devices || [];
   routes = routeData.routes;
   document.getElementById('mode-badge').textContent = devData.mode;
 
@@ -145,6 +147,19 @@ async function loadDashboard() {
   document.getElementById('stat-messages').textContent = monData.stats.total || 0;
   document.getElementById('device-count').textContent = devices.length;
 
+  // New-device banner
+  const unconfigured = window._unconfiguredDevices || [];
+  const banner = document.getElementById('new-devices-banner');
+  if (banner) {
+    if (unconfigured.length > 0) {
+      document.getElementById('new-devices-text').textContent =
+        `${unconfigured.length} new device${unconfigured.length > 1 ? 's' : ''} detected — setup needed`;
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
   // Device list
   const list = document.getElementById('device-list');
   if (devices.length === 0) {
@@ -152,9 +167,16 @@ async function loadDashboard() {
     return;
   }
 
-  list.innerHTML = devices.map(d => `
+  const displayNames = window._deviceDisplayNames || {};
+  list.innerHTML = devices.map(d => {
+    const label = displayNames[d.name] || d.name;
+    const needsSetup = unconfigured.includes(d.name);
+    const setupBadge = needsSetup
+      ? `<span style="font-size:10px; background:#c97d10; color:#fff; border-radius:3px; padding:1px 5px; margin-left:6px;">Setup needed</span>`
+      : '';
+    return `
     <div class="device-card">
-      <div class="device-name">${esc(d.name)}</div>
+      <div class="device-name">${esc(label)}${setupBadge}</div>
       <div class="device-meta">
         ${d.port_type.toUpperCase()} &middot; ${d.direction} &middot; ${d.device_type}
         ${d.midi_channel ? ' &middot; ch ' + d.midi_channel : ''}
@@ -167,8 +189,8 @@ async function loadDashboard() {
         </span>
         <button class="btn btn-sm" style="margin-left:auto;" onclick="openDeviceModal('${esc(d.name)}')">Configure</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // Lightweight dashboard update — only refreshes activity dots/counts.
@@ -1613,7 +1635,10 @@ function openDeviceModal(name) {
   const dev = devices.find(d => d.name === name);
   if (!dev) return;
 
-  document.getElementById('device-modal-name').textContent = name;
+  const displayNames = window._deviceDisplayNames || {};
+  document.getElementById('device-modal-name').textContent = displayNames[name] || name;
+  document.getElementById('device-internal-name').textContent = name;
+  document.getElementById('device-display-name').value = displayNames[name] || '';
   document.getElementById('device-direction').value = dev.direction || 'both';
   document.getElementById('device-type').value = dev.device_type || 'unknown';
   document.getElementById('device-channel').value = dev.midi_channel || 0;
@@ -1631,10 +1656,11 @@ async function applyDeviceConfig() {
   const direction = document.getElementById('device-direction').value;
   const device_type = document.getElementById('device-type').value;
   const midi_channel = parseInt(document.getElementById('device-channel').value) || 0;
+  const display_name = document.getElementById('device-display-name').value.trim();
 
   await api(`/devices/${encodeURIComponent(pendingDeviceName)}/config`, {
     method: 'POST',
-    body: { direction, device_type, midi_channel },
+    body: { direction, device_type, midi_channel, display_name },
   });
 
   closeDeviceModal();

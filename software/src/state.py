@@ -24,7 +24,8 @@ DEFAULT_STATE = {
         "bpm": 120.0,
     },
     "routes": [],
-    "device_overrides": {},  # {device_name: {direction, device_type, midi_channel}}
+    "device_overrides": {},       # {device_name: {direction, device_type, midi_channel}}
+    "device_display_names": {},   # {internal_name: display_label} — cosmetic only
     "launcher": {},          # clip launcher state (layers, quantum, beats_per_bar)
     "recorder_clock": {      # per-module quantize only (BPM is in clock{})
         "quantize": "free",
@@ -145,6 +146,22 @@ class StateManager:
     def set_launcher_state(self, data: dict):
         self.state["launcher"] = data
         self.save()
+
+    def get_device_display_names(self) -> dict:
+        return dict(self.state.get("device_display_names", {}))
+
+    def set_device_display_name(self, internal_name: str, display_name: str) -> None:
+        names = self.state.get("device_display_names", {})
+        names[internal_name] = display_name
+        self.state["device_display_names"] = names
+        self.save()
+
+    def remove_device_display_name(self, internal_name: str) -> None:
+        names = self.state.get("device_display_names", {})
+        if internal_name in names:
+            del names[internal_name]
+            self.state["device_display_names"] = names
+            self.save()
 
     def get_device_overrides(self) -> dict:
         return self.state.get("device_overrides", {})

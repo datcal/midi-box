@@ -105,6 +105,10 @@
           <h3>Connected Devices</h3>
           <button class="btn btn-sm" onclick="rescanDevices()">Rescan</button>
         </div>
+        <div id="new-devices-banner" style="display:none; background:var(--warning,#c97d10); color:#fff; padding:8px 12px; border-radius:6px; margin:8px 0; font-size:13px; display:none; align-items:center; gap:8px;">
+          <span style="flex:1" id="new-devices-text"></span>
+          <button class="btn btn-sm" style="background:rgba(255,255,255,0.2); color:#fff;" onclick="showPage('devices')">Configure →</button>
+        </div>
         <div class="device-list" id="device-list"></div>
       </div>
     </div>
@@ -724,6 +728,13 @@
   <div class="modal">
     <h3>Device Settings</h3>
     <div id="device-modal-name" style="font-size:14px; font-weight:600; color:var(--accent); margin-bottom:12px;"></div>
+    <div class="form-row">
+      <label>Display Name</label>
+      <input type="text" id="device-display-name" placeholder="Leave blank to use auto-detected name">
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">
+        Auto-detected: <span id="device-internal-name" style="font-family:monospace"></span>
+      </div>
+    </div>
     <div class="form-row">
       <label>Direction</label>
       <select id="device-direction">

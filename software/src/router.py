@@ -151,8 +151,12 @@ class MidiRouter:
         if message.type in ("clock", "start", "stop", "continue", "songpos"):
             if message.type == "clock":
                 # Raw clock tick: deliver to ClockManager only, never route.
+                # Only forward from the designated clock source; drop ticks from
+                # all other devices to prevent BPM corruption when multiple
+                # devices are sending clock simultaneously.
                 if self._clock_callback:
-                    self._clock_callback(message)
+                    if not self._clock_source or source_name == self._clock_source:
+                        self._clock_callback(message)
                 return
 
             # Transport (start/stop/continue/songpos):

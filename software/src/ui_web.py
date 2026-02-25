@@ -240,6 +240,8 @@ def create_app(bridge):
         return jsonify({
             "devices": list(st.get("devices", [])),
             "mode": st.get("mode", "standalone"),
+            "unconfigured_devices": list(st.get("unconfigured_devices", [])),
+            "device_display_names": dict(st.get("device_display_names", {})),
         })
 
     @app.route("/api/devices/<name>/config", methods=["POST"])
@@ -250,6 +252,7 @@ def create_app(bridge):
             "direction": data.get("direction"),
             "device_type": data.get("device_type"),
             "midi_channel": data.get("midi_channel"),
+            "display_name": data.get("display_name", ""),
         })
         if not result.get("ok"):
             return jsonify({"ok": False, "error": result.get("error", "Device not found")}), 404
