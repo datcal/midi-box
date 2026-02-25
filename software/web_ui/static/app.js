@@ -81,6 +81,7 @@ function loadPageData(page) {
     case 'settings': loadSettings(); break;
     case 'logs': startLogs(); break;
     case 'system': startSystem(); break;
+    case 'virtualhere': loadVirtualhere(); break;
   }
 }
 
@@ -1697,6 +1698,7 @@ function esc(str) {
 // --- System page ---
 
 let systemInterval = null;
+let vhInterval = null;
 
 function startSystem() {
   refreshSystem();
@@ -2371,6 +2373,101 @@ async function triggerUpdate() {
     if (err) err.textContent = 'Failed to trigger update';
     if (btn) { btn.disabled = false; btn.textContent = 'Install Update'; }
   }
+}
+
+// --- VirtualHere USB Share ---
+
+async function loadVirtualhere() {
+  const [vhData, netData] = await Promise.all([
+    api('/virtualhere'),
+    api('/network'),
+  ]);
+  _renderVirtualhere(vhData, netData);
+
+  if (vhInterval) clearInterval(vhInterval);
+  vhInterval = setInterval(async () => {
+    if (currentPage !== 'virtualhere') {
+      clearInterval(vhInterval); vhInterval = null; return;
+    }
+    const [d, n] = await Promise.all([api('/virtualhere'), api('/network')]);
+    _renderVirtualhere(d, n);
+  }, 5000);
+}
+
+function _renderVirtualhere(vhData, netData) {
+  const running = vhData.running || false;
+
+  const banner = document.getElementById('vh-warning-banner');
+  if (banner) banner.style.display = running ? '' : 'none';
+
+  const badge = document.getElementById('vh-status-badge');
+  if (badge) {
+    badge.textContent = running ? 'RUNNING' : 'STOPPED';
+    badge.style.background = running ? 'rgba(46,204,113,0.15)' : 'rgba(231,76,60,0.15)';
+    badge.style.color = running ? 'var(--success)' : 'var(--danger)';
+  }
+
+  const startBtn = document.getElementById('vh-start-btn');
+  const stopBtn  = document.getElementById('vh-stop-btn');
+  if (startBtn) startBtn.disabled = running;
+  if (stopBtn)  stopBtn.disabled  = !running;
+
+  const addrEl = document.getElementById('vh-server-addr');
+  if (addrEl && netData && netData.ip) addrEl.textContent = `${netData.ip}:7575`;
+
+  const logEl = document.getElementById('vh-log');
+  if (logEl) {
+    const lines = vhData.log || [];
+    if (lines.length === 0) {
+      logEl.innerHTML = running
+        ? '<span style="color:var(--text-muted);">No log output yet…</span>'
+        : '<span style="color:var(--text-muted);">Start the server to see logs…</span>';
+    } else {
+      logEl.textContent = lines.join('\n');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+}
+
+async function vhStart() {
+  const msg = document.getElementById('vh-action-msg');
+  const btn = document.getElementById('vh-start-btn');
+  if (btn) btn.disabled = true;
+  if (msg) { msg.textContent = 'Starting…'; msg.style.color = 'var(--warning)'; }
+  const result = await api('/virtualhere/start', { method: 'POST' });
+  if (msg) {
+    msg.textContent = result.ok ? 'Started.' : (result.error || 'Failed — check sudoers setup');
+    msg.style.color = result.ok ? 'var(--success)' : 'var(--danger)';
+  }
+  const [d, n] = await Promise.all([api('/virtualhere'), api('/network')]);
+  _renderVirtualhere(d, n);
+  setTimeout(() => { if (msg) msg.textContent = ''; }, 4000);
+}
+
+async function vhStop() {
+  const msg = document.getElementById('vh-action-msg');
+  const btn = document.getElementById('vh-stop-btn');
+  if (btn) btn.disabled = true;
+  if (msg) { msg.textContent = 'Stopping…'; msg.style.color = 'var(--warning)'; }
+  const result = await api('/virtualhere/stop', { method: 'POST' });
+  if (msg) {
+    msg.textContent = result.ok ? 'Stopped.' : (result.error || 'Failed — check sudoers setup');
+    msg.style.color = result.ok ? 'var(--success)' : 'var(--danger)';
+  }
+  const [d, n] = await Promise.all([api('/virtualhere'), api('/network')]);
+  _renderVirtualhere(d, n);
+  setTimeout(() => { if (msg) msg.textContent = ''; }, 4000);
+}
+
+function vhToggleSetup() {
+  const body    = document.getElementById('vh-setup-body');
+  const chevron = document.getElementById('vh-setup-chevron');
+  const header  = document.getElementById('vh-setup-header');
+  if (!body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  if (chevron) chevron.textContent = open ? '\u25B2' : '\u25BC';
+  if (header) header.setAttribute('aria-expanded', String(open));
 }
 
 // --- Hash-based navigation ---

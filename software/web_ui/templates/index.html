@@ -48,6 +48,9 @@
       <li class="perf-hide"><a href="#logs" data-page="logs">
         <span class="nav-icon">&#9993;</span><span>Logs</span>
       </a></li>
+      <li class="perf-hide"><a href="#virtualhere" data-page="virtualhere">
+        <span class="nav-icon">&#8667;</span><span>USB Share</span>
+      </a></li>
       <li><a href="#system" data-page="system">
         <span class="nav-icon">&#11041;</span><span>System</span>
       </a></li>
@@ -595,6 +598,114 @@
       </div>
     </div>
 
+
+    <!-- ============== VIRTUALHERE USB SHARE ============== -->
+    <div class="page" id="page-virtualhere">
+      <div class="page-header">
+        <h2>USB Share</h2>
+        <p>Share USB devices to Mac via VirtualHere USB-over-IP</p>
+      </div>
+
+      <div id="vh-warning-banner" style="display:none; background:var(--warning);
+           color:#1a1a2e; padding:10px 16px; border-radius:var(--radius);
+           margin-bottom:12px; font-size:13px; font-weight:600; line-height:1.6;">
+        &#9888; VirtualHere is running. When a Mac client claims a device,
+        MIDI routing for that device will pause. Stop VirtualHere to restore routing.
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Server Status</h3>
+          <span class="sys-service-badge" id="vh-status-badge">CHECKING…</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-accent" id="vh-start-btn" onclick="vhStart()">
+            &#9654; Start VirtualHere
+          </button>
+          <button class="btn btn-danger" id="vh-stop-btn" onclick="vhStop()">
+            &#9632; Stop VirtualHere
+          </button>
+          <span id="vh-action-msg" style="font-size:12px; color:var(--text-muted);"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>Connect from Mac</h3></div>
+        <ol style="font-size:13px; color:var(--text-secondary); line-height:2; padding-left:20px;">
+          <li>Download and install the
+            <a href="https://www.virtualhere.com/usb_client_software"
+               target="_blank" style="color:var(--accent);">
+              VirtualHere USB Client for macOS
+            </a> (free for 1 device)
+          </li>
+          <li>Open VirtualHere Client on your Mac</li>
+          <li>Click <strong>File &#8594; Connect to Server…</strong></li>
+          <li>Enter server address: <code id="vh-server-addr">192.168.4.1:7575</code></li>
+          <li>Expand the server in the device list and double-click your device to use it</li>
+        </ol>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:10px; line-height:1.6;">
+          While a device is claimed by Mac, MIDI routing for it will be temporarily disabled.
+          Stop VirtualHere or release the device in the client to restore routing.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-header" style="cursor:pointer;" onclick="vhToggleSetup()"
+             id="vh-setup-header" aria-expanded="false">
+          <h3>One-Time Pi Setup</h3>
+          <span id="vh-setup-chevron" style="color:var(--text-muted);">&#9660;</span>
+        </div>
+        <div id="vh-setup-body" style="display:none;">
+          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.7;">
+            Run these commands once on the Raspberry Pi (via SSH):
+          </p>
+          <div style="background:var(--bg-primary); border:1px solid var(--border);
+                      border-radius:6px; padding:12px; font-family:monospace;
+                      font-size:11px; color:var(--text-secondary);
+                      white-space:pre-wrap; line-height:1.8;"># 1. Download VirtualHere USB server for ARM (Raspberry Pi)
+wget -O /tmp/vhusbdarm https://www.virtualhere.com/sites/default/files/usbserver/vhusbdarm
+
+# 2. Install binary
+sudo mv /tmp/vhusbdarm /usr/local/bin/vhusbd
+sudo chmod +x /usr/local/bin/vhusbd
+
+# 3. Create systemd service
+sudo tee /etc/systemd/system/vhusbd.service &lt;&lt;EOF
+[Unit]
+Description=VirtualHere USB Server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/vhusbd -b -s
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 4. Enable service (start/stop via the dashboard button above)
+sudo systemctl daemon-reload
+sudo systemctl enable vhusbd
+
+# 5. Allow dashboard to start/stop without password (replace YOUR_USER)
+echo "YOUR_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start vhusbd, /usr/bin/systemctl stop vhusbd" \
+  | sudo tee /etc/sudoers.d/vhusbd</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>Server Log</h3>
+          <button class="btn btn-sm" onclick="loadVirtualhere()">&#8635; Refresh</button>
+        </div>
+        <div id="vh-log" style="background:var(--bg-primary); border:1px solid var(--border);
+             border-radius:6px; padding:10px; font-size:11px; font-family:monospace;
+             max-height:300px; overflow-y:auto; color:var(--text-secondary);
+             white-space:pre-wrap; line-height:1.6;">
+          <span style="color:var(--text-muted);">Start the server to see logs…</span>
+        </div>
+      </div>
+    </div>
 
     <!-- ============== LOGS ============== -->
     <div class="page" id="page-logs">

@@ -796,6 +796,57 @@ def create_app(bridge):
     def api_rtpmidi_status():
         return jsonify(dict(_state().get("rtp_midi", {"enabled": False, "sessions": []})))
 
+    @app.route("/api/virtualhere")
+    def api_virtualhere_status():
+        import subprocess
+        running = False
+        log_lines = []
+        try:
+            r = subprocess.run(
+                ["systemctl", "is-active", "vhusbd"],
+                capture_output=True, text=True, timeout=3,
+            )
+            running = r.stdout.strip() == "active"
+        except Exception:
+            pass
+        try:
+            r = subprocess.run(
+                ["journalctl", "-u", "vhusbd", "-n", "100",
+                 "--no-pager", "--output", "cat"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                log_lines = r.stdout.strip().splitlines()
+        except Exception:
+            pass
+        return jsonify({"running": running, "log": log_lines})
+
+    @app.route("/api/virtualhere/start", methods=["POST"])
+    def api_virtualhere_start():
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["sudo", "/usr/bin/systemctl", "start", "vhusbd"],
+                capture_output=True, text=True, timeout=10,
+            )
+            ok = r.returncode == 0
+            return jsonify({"ok": ok, "error": r.stderr.strip() if not ok else ""})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.route("/api/virtualhere/stop", methods=["POST"])
+    def api_virtualhere_stop():
+        import subprocess
+        try:
+            r = subprocess.run(
+                ["sudo", "/usr/bin/systemctl", "stop", "vhusbd"],
+                capture_output=True, text=True, timeout=10,
+            )
+            ok = r.returncode == 0
+            return jsonify({"ok": ok, "error": r.stderr.strip() if not ok else ""})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.route("/api/looper")
     def api_looper_status():
         return jsonify(dict(_state().get("looper", {"slots": []})))
