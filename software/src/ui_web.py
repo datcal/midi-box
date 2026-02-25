@@ -819,7 +819,9 @@ def create_app(bridge):
                 log_lines = r.stdout.strip().splitlines()
         except Exception:
             pass
-        return jsonify({"running": running, "log": log_lines})
+        import os as _os
+        installed = _os.path.isfile("/usr/local/bin/vhusbd")
+        return jsonify({"running": running, "installed": installed, "log": log_lines})
 
     @app.route("/api/virtualhere/start", methods=["POST"])
     def api_virtualhere_start():
@@ -846,6 +848,26 @@ def create_app(bridge):
             return jsonify({"ok": ok, "error": r.stderr.strip() if not ok else ""})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
+
+    @app.route("/api/virtualhere/setup", methods=["POST"])
+    def api_virtualhere_setup():
+        import subprocess, os
+        script = os.path.realpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "setup_virtualhere.sh")
+        )
+        if not os.path.isfile(script):
+            return jsonify({"ok": False, "output": f"Setup script not found: {script}"}), 500
+        try:
+            r = subprocess.run(
+                ["sudo", "bash", script],
+                capture_output=True, text=True, timeout=120,
+            )
+            output = r.stdout + (("\n" + r.stderr) if r.stderr.strip() else "")
+            return jsonify({"ok": r.returncode == 0, "output": output.strip()})
+        except subprocess.TimeoutExpired:
+            return jsonify({"ok": False, "output": "Setup timed out after 120 seconds."}), 500
+        except Exception as e:
+            return jsonify({"ok": False, "output": str(e)}), 500
 
     @app.route("/api/looper")
     def api_looper_status():

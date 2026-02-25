@@ -2395,7 +2395,8 @@ async function loadVirtualhere() {
 }
 
 function _renderVirtualhere(vhData, netData) {
-  const running = vhData.running || false;
+  const running   = vhData.running   || false;
+  const installed = vhData.installed || false;
 
   const banner = document.getElementById('vh-warning-banner');
   if (banner) banner.style.display = running ? '' : 'none';
@@ -2407,9 +2408,17 @@ function _renderVirtualhere(vhData, netData) {
     badge.style.color = running ? 'var(--success)' : 'var(--danger)';
   }
 
+  // Show INSTALLED badge and disable install button once binary is present
+  const installedBadge = document.getElementById('vh-installed-badge');
+  if (installedBadge) installedBadge.style.display = installed ? '' : 'none';
+  const setupBtn = document.getElementById('vh-setup-btn');
+  if (setupBtn && installed) {
+    setupBtn.textContent = '\u2699 Re-install VirtualHere';
+  }
+
   const startBtn = document.getElementById('vh-start-btn');
   const stopBtn  = document.getElementById('vh-stop-btn');
-  if (startBtn) startBtn.disabled = running;
+  if (startBtn) startBtn.disabled = running || !installed;
   if (stopBtn)  stopBtn.disabled  = !running;
 
   const addrEl = document.getElementById('vh-server-addr');
@@ -2459,15 +2468,30 @@ async function vhStop() {
   setTimeout(() => { if (msg) msg.textContent = ''; }, 4000);
 }
 
-function vhToggleSetup() {
-  const body    = document.getElementById('vh-setup-body');
-  const chevron = document.getElementById('vh-setup-chevron');
-  const header  = document.getElementById('vh-setup-header');
-  if (!body) return;
-  const open = body.style.display === 'none';
-  body.style.display = open ? '' : 'none';
-  if (chevron) chevron.textContent = open ? '\u25B2' : '\u25BC';
-  if (header) header.setAttribute('aria-expanded', String(open));
+async function vhSetup() {
+  const btn = document.getElementById('vh-setup-btn');
+  const msg = document.getElementById('vh-setup-msg');
+  const out = document.getElementById('vh-setup-output');
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
+  if (msg) { msg.textContent = 'Downloading and installing (may take ~30 s)…'; msg.style.color = 'var(--warning)'; }
+  if (out) { out.style.display = ''; out.textContent = ''; }
+
+  const result = await api('/virtualhere/setup', { method: 'POST' }, 130000);
+
+  if (out) {
+    out.textContent = result.output || (result.error || 'No output.');
+    out.scrollTop = out.scrollHeight;
+  }
+  if (msg) {
+    msg.textContent = result.ok ? 'Installed successfully.' : 'Installation failed — see output above.';
+    msg.style.color = result.ok ? 'var(--success)' : 'var(--danger)';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '\u2699 Install VirtualHere'; }
+
+  // Refresh status to reflect newly installed service
+  const [d, n] = await Promise.all([api('/virtualhere'), api('/network')]);
+  _renderVirtualhere(d, n);
 }
 
 // --- Hash-based navigation ---

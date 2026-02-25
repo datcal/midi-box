@@ -650,47 +650,33 @@
       </div>
 
       <div class="card">
-        <div class="card-header" style="cursor:pointer;" onclick="vhToggleSetup()"
-             id="vh-setup-header" aria-expanded="false">
-          <h3>One-Time Pi Setup</h3>
-          <span id="vh-setup-chevron" style="color:var(--text-muted);">&#9660;</span>
+        <div class="card-header">
+          <h3>Install VirtualHere</h3>
+          <span id="vh-installed-badge" style="display:none;
+                font-size:11px; font-weight:600; padding:3px 10px;
+                border-radius:4px; background:rgba(46,204,113,0.15);
+                color:var(--success);">INSTALLED</span>
         </div>
-        <div id="vh-setup-body" style="display:none;">
-          <p style="font-size:12px; color:var(--text-secondary); margin-bottom:12px; line-height:1.7;">
-            Run these commands once on the Raspberry Pi (via SSH):
-          </p>
-          <div style="background:var(--bg-primary); border:1px solid var(--border);
-                      border-radius:6px; padding:12px; font-family:monospace;
-                      font-size:11px; color:var(--text-secondary);
-                      white-space:pre-wrap; line-height:1.8;"># 1. Download VirtualHere USB server for ARM (Raspberry Pi)
-wget -O /tmp/vhusbdarm https://www.virtualhere.com/sites/default/files/usbserver/vhusbdarm
-
-# 2. Install binary
-sudo mv /tmp/vhusbdarm /usr/local/bin/vhusbd
-sudo chmod +x /usr/local/bin/vhusbd
-
-# 3. Create systemd service
-sudo tee /etc/systemd/system/vhusbd.service &lt;&lt;EOF
-[Unit]
-Description=VirtualHere USB Server
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/vhusbd -b -s
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# 4. Enable service (start/stop via the dashboard button above)
-sudo systemctl daemon-reload
-sudo systemctl enable vhusbd
-
-# 5. Allow dashboard to start/stop without password (replace YOUR_USER)
-echo "YOUR_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start vhusbd, /usr/bin/systemctl stop vhusbd" \
-  | sudo tee /etc/sudoers.d/vhusbd</div>
+        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:14px; line-height:1.7;">
+          Click to automatically download and install the VirtualHere USB server on this Pi.
+          Requires internet access.
+        </p>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-accent" id="vh-setup-btn" onclick="vhSetup()">
+            &#9881; Install VirtualHere
+          </button>
+          <span id="vh-setup-msg" style="font-size:12px; color:var(--text-muted);"></span>
         </div>
+        <div id="vh-setup-output" style="display:none; margin-top:14px;
+             background:var(--bg-primary); border:1px solid var(--border);
+             border-radius:6px; padding:10px; font-family:monospace;
+             font-size:11px; color:var(--text-secondary);
+             white-space:pre-wrap; line-height:1.6; max-height:260px;
+             overflow-y:auto;"></div>
+        <p style="font-size:11px; color:var(--text-muted); margin-top:12px; line-height:1.6;">
+          Or run manually via SSH:
+          <code style="font-size:11px;">sudo bash scripts/setup_virtualhere.sh</code>
+        </p>
       </div>
 
       <div class="card">

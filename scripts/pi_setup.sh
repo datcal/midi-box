@@ -217,6 +217,24 @@ EOF
 chmod 0440 "$SUDOERS_UPDATE"
 log "Sudoers entry written: $SUDOERS_UPDATE"
 
+# Sudoers: allow service user to run VirtualHere setup and start/stop the server
+# without a password — needed for the web UI USB Share page.
+SUDOERS_VH="/etc/sudoers.d/midi-box-virtualhere"
+cat > "$SUDOERS_VH" << EOF
+# MIDI Box — allow web UI to install and control VirtualHere USB server
+$SERVICE_USER ALL=(ALL) NOPASSWD: $SCRIPT_DIR/setup_virtualhere.sh
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl start vhusbd
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop vhusbd
+EOF
+chmod 0440 "$SUDOERS_VH"
+log "Sudoers entry written: $SUDOERS_VH"
+
+# Install VirtualHere USB server
+if [[ "$UPDATE_ONLY" == "false" ]]; then
+    step "Running VirtualHere USB server setup"
+    bash "$SCRIPT_DIR/setup_virtualhere.sh" || warn "VirtualHere setup failed — run manually later from the web UI USB Share page"
+fi
+
 if [[ "$UPDATE_ONLY" == "false" ]]; then
 
 # ---------------------------------------------------------------------------
