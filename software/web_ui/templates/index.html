@@ -832,6 +832,13 @@
         Auto-detected: <span id="device-internal-name" style="font-family:monospace"></span>
       </div>
     </div>
+    <div class="form-row" id="device-port-row" style="display:none">
+      <label>ALSA Port</label>
+      <select id="device-port-select"></select>
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">
+        Select which MIDI port this device uses. Persists across restarts.
+      </div>
+    </div>
     <div class="form-row">
       <label>Direction</label>
       <select id="device-direction">

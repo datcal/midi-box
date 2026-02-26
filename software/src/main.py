@@ -280,6 +280,34 @@ class MidiBox:
                 logger.info(f"  USB: {device.name} (port: {port.port_name})")
         if not ports:
             logger.info("  No USB MIDI devices found")
+        # Apply any manually-saved port overrides (handles ALSA client number changes)
+        self._apply_port_overrides()
+
+    def _apply_port_overrides(self):
+        """After all devices are registered, honour saved port_id overrides.
+
+        ALSA assigns a new client number on every boot, so the full port string
+        changes (e.g. "TR-8S:TR-8S MIDI 2 20:0" → "…32:0").  We store only the
+        stable base name (everything before the trailing " dd:d" suffix) and
+        find the matching open port at startup.
+        """
+        import re
+        overrides = self.state.get_device_overrides()
+        with self.alsa._lock:
+            open_ports = list(self.alsa.ports.keys())
+        for dev_name, cfg in overrides.items():
+            saved_port = cfg.get("port_id", "")
+            if not saved_port:
+                continue
+            dev = self.registry.get_device(dev_name)
+            if not dev or dev.port_type != "usb":
+                continue
+            # Strip trailing ALSA "client:port" number to get the stable base
+            base = re.sub(r'\s+\d+:\d+$', '', saved_port)
+            match = next((p for p in open_ports if p.startswith(base)), None)
+            if match and match != dev.port_id:
+                logger.info(f"Port override: {dev_name} → {match} (was {dev.port_id})")
+                dev.port_id = match
 
     def _load_wifi_config(self) -> dict:
         """Load WiFi AP settings from midi_box.yaml, falling back to defaults."""
@@ -604,10 +632,19 @@ class MidiBox:
             if not ok:
                 return {"ok": False, "error": "Device not found"}
             dev = self.registry.get_device(name)
+            # Port override: allow user to manually select which ALSA port to use
+            port_id = params.get("port_id", "").strip()
+            existing_overrides = self.state.get_device_overrides()
+            if port_id and dev.port_type == "usb":
+                dev.port_id = port_id
+            else:
+                # Preserve any previously-saved port_id override
+                port_id = existing_overrides.get(name, {}).get("port_id", "")
             self.state.set_device_override(name, {
                 "direction": dev.direction,
                 "device_type": dev.device_type,
                 "midi_channel": dev.midi_channel,
+                "port_id": port_id,
             })
             self.registry.set_device_overrides(self.state.get_device_overrides())
             # Save display name if provided
@@ -1065,6 +1102,10 @@ class MidiBox:
 
         # Looper
         self.bridge.state["looper"] = self.looper.get_status()
+
+        # All currently-open ALSA port names (for the port selector UI)
+        with self.alsa._lock:
+            self.bridge.state["raw_ports"] = sorted(self.alsa.ports.keys())
 
         # Device onboarding: which devices have no user-configured overrides yet
         overrides = self.state.get_device_overrides()

@@ -118,6 +118,7 @@ async function loadDashboard() {
   devices = devData.devices;
   window._deviceDisplayNames = devData.device_display_names || {};
   window._unconfiguredDevices = devData.unconfigured_devices || [];
+  window._rawPorts = devData.raw_ports || [];
   routes = routeData.routes;
   document.getElementById('mode-badge').textContent = devData.mode;
 
@@ -1643,6 +1644,25 @@ function openDeviceModal(name) {
   document.getElementById('device-direction').value = dev.direction || 'both';
   document.getElementById('device-type').value = dev.device_type || 'unknown';
   document.getElementById('device-channel').value = dev.midi_channel || 0;
+
+  // Port selector — only for USB devices
+  const portRow = document.getElementById('device-port-row');
+  const portSel = document.getElementById('device-port-select');
+  if (dev.port_type === 'usb') {
+    portRow.style.display = '';
+    const ports = window._rawPorts || [];
+    portSel.innerHTML = ports.map(p =>
+      `<option value="${esc(p)}"${p === dev.port_id ? ' selected' : ''}>${esc(p)}</option>`
+    ).join('');
+    // If current port_id is not in the list (stale), add it as a note
+    if (dev.port_id && !ports.includes(dev.port_id)) {
+      portSel.insertAdjacentHTML('afterbegin',
+        `<option value="${esc(dev.port_id)}" selected>${esc(dev.port_id)} (current, not found)</option>`);
+    }
+  } else {
+    portRow.style.display = 'none';
+  }
+
   document.getElementById('device-modal').classList.add('active');
 }
 
@@ -1658,10 +1678,14 @@ async function applyDeviceConfig() {
   const device_type = document.getElementById('device-type').value;
   const midi_channel = parseInt(document.getElementById('device-channel').value) || 0;
   const display_name = document.getElementById('device-display-name').value.trim();
+  const dev = devices.find(d => d.name === pendingDeviceName);
+  const port_id = (dev?.port_type === 'usb')
+    ? document.getElementById('device-port-select').value
+    : '';
 
   await api(`/devices/${encodeURIComponent(pendingDeviceName)}/config`, {
     method: 'POST',
-    body: { direction, device_type, midi_channel, display_name },
+    body: { direction, device_type, midi_channel, display_name, port_id },
   });
 
   closeDeviceModal();
