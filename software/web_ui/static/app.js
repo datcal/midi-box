@@ -1650,7 +1650,10 @@ function openDeviceModal(name) {
   const portSel = document.getElementById('device-port-select');
   if (dev.port_type === 'usb') {
     portRow.style.display = '';
-    const ports = window._rawPorts || [];
+    // Only show ports that belong to this device (device name appears in port string)
+    const ports = (window._rawPorts || []).filter(p =>
+      p.toLowerCase().includes(dev.name.toLowerCase())
+    );
     portSel.innerHTML = ports.map(p =>
       `<option value="${esc(p)}"${p === dev.port_id ? ' selected' : ''}>${esc(p)}</option>`
     ).join('');
