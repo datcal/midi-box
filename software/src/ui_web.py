@@ -525,6 +525,15 @@ def create_app(bridge):
         data = request.json
         return jsonify(_cmd("launcher.delete_file", {"file": data.get("file", "")}))
 
+    @app.route("/api/launcher/columns/<int:slot>/launch", methods=["POST"])
+    def api_launcher_launch_column(slot):
+        return jsonify(_cmd("launcher.launch_column", {"slot": slot}))
+
+    @app.route("/api/launcher/start-point", methods=["POST"])
+    def api_launcher_set_start_point():
+        data = request.json
+        return jsonify(_cmd("launcher.set_start_point", data))
+
     # ---------------------------------------------------------------
     # API: MIDI Player
     # ---------------------------------------------------------------

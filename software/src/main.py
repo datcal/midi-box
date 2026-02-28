@@ -886,6 +886,18 @@ class MidiBox:
             ok = self.launcher.delete_file(params["file"])
             return {"ok": ok}
 
+        elif action == "launcher.launch_column":
+            self.launcher.launch_column(params["slot"])
+            return {"ok": True}
+
+        elif action == "launcher.set_start_point":
+            self.launcher.set_start_point(
+                column=params.get("column"),
+                layer_id=params.get("layer_id"),
+                slot=params.get("slot"),
+            )
+            return {"ok": True}
+
         # --- Player ---
         elif action == "player.play":
             ok = self.player.play(

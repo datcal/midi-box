@@ -85,6 +85,10 @@ class ClipLauncher:
         self._bar = 0
         self._transport_running = False
 
+        # Start-point selection (mutually exclusive)
+        self.start_column: int | None = None
+        self.start_cell: tuple | None = None  # (layer_id, slot)
+
         self._lock = threading.Lock()
 
         MIDI_FILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -114,6 +118,7 @@ class ClipLauncher:
         """Start transport (clips can play on next quantum boundary)."""
         with self._lock:
             self._transport_running = True
+            self._apply_start_point()
         bpm = self._clock_manager.bpm if self._clock_manager else "?"
         logger.info(f"Transport START — {bpm} BPM, {self.quantum} quantize")
 
@@ -129,6 +134,7 @@ class ClipLauncher:
         if message.type == "start":
             with self._lock:
                 self._transport_running = True
+                self._apply_start_point()
             logger.info("External transport START")
         elif message.type == "stop":
             with self._lock:
@@ -253,6 +259,71 @@ class ClipLauncher:
         """Immediately stop all clips on all layers."""
         with self._lock:
             self._stop_all_clips()
+
+    def launch_column(self, slot: int):
+        """Queue all layers to play the clip at this slot (scene launch)."""
+        with self._lock:
+            for layer in self.layers:
+                clip = layer.clips[slot]
+                if clip.state == ClipState.EMPTY:
+                    continue
+                if layer.active_clip == slot:
+                    continue  # already playing this slot
+                if layer.queued_clip is not None:
+                    layer.clips[layer.queued_clip].state = ClipState.STOPPED
+                clip.state = ClipState.QUEUED
+                layer.queued_clip = slot
+                if layer.active_clip is not None:
+                    layer.clips[layer.active_clip].state = ClipState.STOPPING
+            if not self._transport_running:
+                self._transport_running = True
+                self._process_queued_launches()
+
+    def set_start_point(self, column=None, layer_id=None, slot=None):
+        """Set column or cell as transport start point (mutually exclusive).
+        Toggle: calling with the same value again clears the selection.
+        Call with no args to clear entirely.
+        """
+        with self._lock:
+            if column is not None:
+                self.start_column = None if self.start_column == column else column
+                self.start_cell = None
+            elif layer_id is not None and slot is not None:
+                new_cell = (layer_id, slot)
+                self.start_cell = None if self.start_cell == new_cell else new_cell
+                self.start_column = None
+            else:
+                self.start_column = None
+                self.start_cell = None
+
+    def _apply_start_point(self):
+        """Queue clips for the configured start point. Must hold _lock."""
+        if self.start_column is not None:
+            slot = self.start_column
+            for layer in self.layers:
+                clip = layer.clips[slot]
+                if clip.state == ClipState.EMPTY:
+                    continue
+                if layer.active_clip == slot:
+                    continue
+                if layer.queued_clip is not None:
+                    layer.clips[layer.queued_clip].state = ClipState.STOPPED
+                clip.state = ClipState.QUEUED
+                layer.queued_clip = slot
+                if layer.active_clip is not None:
+                    layer.clips[layer.active_clip].state = ClipState.STOPPING
+        elif self.start_cell is not None:
+            sc_layer_id, sc_slot = self.start_cell
+            layer = self._get_layer(sc_layer_id)
+            if layer:
+                clip = layer.clips[sc_slot]
+                if clip.state != ClipState.EMPTY:
+                    if layer.queued_clip is not None:
+                        layer.clips[layer.queued_clip].state = ClipState.STOPPED
+                    clip.state = ClipState.QUEUED
+                    layer.queued_clip = sc_slot
+                    if layer.active_clip is not None and layer.active_clip != sc_slot:
+                        layer.clips[layer.active_clip].state = ClipState.STOPPING
 
     def _stop_all_clips(self):
         """Stop all clips — must hold lock."""
@@ -542,7 +613,6 @@ class ClipLauncher:
     def get_status(self) -> dict:
         """Full status for API."""
         cm = self._clock_manager
-        bpm = cm.bpm if cm else 120.0
         with self._lock:
             return {
                 "clock": {
@@ -553,6 +623,8 @@ class ClipLauncher:
                     "bar": self._bar,
                     "running": self._transport_running,
                 },
+                "start_column": self.start_column,
+                "start_cell": list(self.start_cell) if self.start_cell else None,
                 "layers": [self._layer_status(l) for l in self.layers],
             }
 
@@ -567,6 +639,8 @@ class ClipLauncher:
                 "bar": self._bar,
                 "bpm": bpm,
                 "running": self._transport_running,
+                "start_column": self.start_column,
+                "start_cell": list(self.start_cell) if self.start_cell else None,
                 "layers": [
                     {
                         "id": l.layer_id,
@@ -606,6 +680,8 @@ class ClipLauncher:
             return {
                 "beats_per_bar": self.beats_per_bar,
                 "quantum": self.quantum,
+                "start_column": self.start_column,
+                "start_cell": list(self.start_cell) if self.start_cell else None,
                 "layers": [
                     {
                         "id": l.layer_id,
@@ -636,6 +712,11 @@ class ClipLauncher:
         clock = data.get("clock", {})
         self.beats_per_bar = data.get("beats_per_bar", clock.get("beats_per_bar", 4))
         self.quantum = data.get("quantum", clock.get("quantum", "bar"))
+
+        sc = data.get("start_column")
+        self.start_column = int(sc) if sc is not None else None
+        cell = data.get("start_cell")
+        self.start_cell = tuple(cell) if cell else None
 
         self.layers.clear()
         for ldata in data.get("layers", []):

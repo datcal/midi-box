@@ -877,6 +877,8 @@ async function clearLogs() {
 let launcherInterval = null;
 let launcherData = null;
 let pendingClipAssign = null; // {layerId, slot}
+let launcherStartColumn = null;  // int | null
+let launcherStartCell = null;    // {layerId, slot} | null
 
 async function loadLauncher() {
   const [data, clockData, devData] = await Promise.all([
@@ -885,6 +887,10 @@ async function loadLauncher() {
     api('/devices'),
   ]);
   launcherData = data;
+
+  // Sync start-point state from full status
+  launcherStartColumn = data.start_column ?? null;
+  launcherStartCell = data.start_cell ? { layerId: data.start_cell[0], slot: data.start_cell[1] } : null;
 
   // Populate clock source select with Internal + all devices
   const srcSel = document.getElementById('launcher-clock-source');
@@ -917,6 +923,9 @@ async function pollLauncher() {
   }
   const poll = await api('/launcher/poll');
   updateBeatDisplay(poll);
+  // Sync start-point state from server
+  launcherStartColumn = poll.start_column ?? null;
+  launcherStartCell = poll.start_cell ? { layerId: poll.start_cell[0], slot: poll.start_cell[1] } : null;
   updateClipStates(poll.layers);
   if (poll.bpm) _syncBpmInputs(poll.bpm);
 }
@@ -978,6 +987,7 @@ function updateClipStates(layerPolls) {
       el.classList.add('clip-' + state);
     });
   });
+  renderStartMarkers();
 }
 
 function renderLauncherGrid(layers, files) {
@@ -987,9 +997,28 @@ function renderLauncherGrid(layers, files) {
     return;
   }
 
-  grid.innerHTML = layers.map(layer => {
+  // Scene row: one column per slot
+  const sceneColCount = layers[0]?.clips?.length || 10;
+  const sceneCols = Array.from({ length: sceneColCount }, (_, i) => {
+    const isStart = launcherStartColumn === i;
+    return `<div class="scene-col">
+      <button class="scene-play-btn" onclick="launchColumn(${i})" title="Play column ${i + 1} on all layers">&#9654; ${i + 1}</button>
+      <button class="scene-start-btn${isStart ? ' active' : ''}" id="scene-start-${i}" onclick="setStartColumn(${i})" title="Set column ${i + 1} as start point">&#8984; start</button>
+    </div>`;
+  }).join('');
+
+  const sceneRow = `<div class="card scene-row">
+    <div class="scene-row-label">Scene launch</div>
+    <div class="scene-clip-row">${sceneCols}</div>
+  </div>`;
+
+  const layerRows = layers.map(layer => {
     const clips = layer.clips.map(c => {
       const stateClass = 'clip-' + c.state;
+      const isStart = launcherStartCell &&
+        launcherStartCell.layerId === layer.id &&
+        launcherStartCell.slot === c.slot;
+      const startClass = isStart ? ' is-start' : '';
       const label = c.state === 'empty'
         ? '+'
         : (c.name || c.filename || '?');
@@ -999,9 +1028,13 @@ function renderLauncherGrid(layers, files) {
       const removeBtn = c.state !== 'empty'
         ? `<span class="clip-remove" onclick="event.stopPropagation(); removeClip(${layer.id}, ${c.slot})">&times;</span>`
         : '';
-      return `<div id="clip-${layer.id}-${c.slot}" class="clip-slot ${stateClass}" ${onclick}>
+      const startToggle = c.state !== 'empty'
+        ? `<span class="clip-start-toggle" onclick="event.stopPropagation(); setStartCell(${layer.id}, ${c.slot})" title="Set as start point">&#8984;</span>`
+        : '';
+      return `<div id="clip-${layer.id}-${c.slot}" class="clip-slot ${stateClass}${startClass}" ${onclick}>
         <span class="clip-label">${esc(label)}</span>
         ${removeBtn}
+        ${startToggle}
       </div>`;
     }).join('');
 
@@ -1019,6 +1052,28 @@ function renderLauncherGrid(layers, files) {
         <div class="clip-row">${clips}</div>
       </div>`;
   }).join('');
+
+  grid.innerHTML = sceneRow + layerRows;
+}
+
+function renderStartMarkers() {
+  // Update scene-start buttons
+  const sceneColCount = launcherData?.layers?.[0]?.clips?.length || 10;
+  for (let i = 0; i < sceneColCount; i++) {
+    const btn = document.getElementById(`scene-start-${i}`);
+    if (btn) btn.classList.toggle('active', launcherStartColumn === i);
+  }
+  // Update clip is-start class
+  (launcherData?.layers || []).forEach(layer => {
+    layer.clips.forEach(c => {
+      const el = document.getElementById(`clip-${layer.id}-${c.slot}`);
+      if (!el) return;
+      const isStart = launcherStartCell &&
+        launcherStartCell.layerId === layer.id &&
+        launcherStartCell.slot === c.slot;
+      el.classList.toggle('is-start', !!isStart);
+    });
+  });
 }
 
 // Clock controls — all delegate to setClockSourceAll
@@ -1085,6 +1140,32 @@ async function removeLayer(layerId) {
 
 async function launcherStopAll() {
   await api('/launcher/stop_all', { method: 'POST' });
+}
+
+async function launchColumn(slot) {
+  await api(`/launcher/columns/${slot}/launch`, { method: 'POST' });
+}
+
+async function setStartColumn(slot) {
+  const newCol = launcherStartColumn === slot ? null : slot;
+  launcherStartColumn = newCol;
+  launcherStartCell = null;
+  renderStartMarkers();
+  await api('/launcher/start-point', {
+    method: 'POST',
+    body: newCol !== null ? { column: newCol } : {},
+  });
+}
+
+async function setStartCell(layerId, slot) {
+  const same = launcherStartCell?.layerId === layerId && launcherStartCell?.slot === slot;
+  launcherStartCell = same ? null : { layerId, slot };
+  launcherStartColumn = null;
+  renderStartMarkers();
+  await api('/launcher/start-point', {
+    method: 'POST',
+    body: !same ? { layer_id: layerId, slot } : {},
+  });
 }
 
 // Clip assign modal
