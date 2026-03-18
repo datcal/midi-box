@@ -1,0 +1,56 @@
+// =============================================================================
+// MIDI Box — Plymouth Boot Splash Script
+// Colors match the web UI: bg #0d1117, accent #0f9b8e, muted #8892a4
+// =============================================================================
+
+screen_width  = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+// --- Background gradient (dark blue-black, top lighter than bottom) ----------
+Window.SetBackgroundTopColor   (0.051, 0.067, 0.090);   // #0d1117
+Window.SetBackgroundBottomColor(0.020, 0.027, 0.040);   // ~#060b10
+
+// --- Horizontal divider line below the title ---------------------------------
+//     Drawn as a very thin one-pixel-tall scaled image
+line_img = Image.NewClear(screen_width, 1, 0.059, 0.608, 0.557, 0.35); // accent, 35% alpha
+line = Sprite(line_img);
+line.SetX(0);
+line.SetY(screen_height / 2 + 2);
+line.SetZ(5);
+
+// --- "MIDI  BOX" title -------------------------------------------------------
+title_img = Image.Text("MIDI  BOX", 0.059, 0.608, 0.557, 1.0, "Sans Bold 48");
+title = Sprite(title_img);
+title.SetX(screen_width  / 2 - title_img.GetWidth()  / 2);
+title.SetY(screen_height / 2 - title_img.GetHeight() - 18);
+title.SetZ(10);
+
+// --- Subtitle ----------------------------------------------------------------
+sub_img = Image.Text("midi router", 0.533, 0.573, 0.643, 1.0, "Sans 15");
+sub = Sprite(sub_img);
+sub.SetX(screen_width / 2 - sub_img.GetWidth() / 2);
+sub.SetY(screen_height / 2 + 14);
+sub.SetZ(10);
+
+// --- Animated loading indicator ----------------------------------------------
+progress = Sprite();
+progress.SetZ(10);
+
+frame = 0;
+
+fun refresh_callback() {
+    frame = frame + 1;
+    tick  = Math.Int(frame / 22) % 4;
+
+    if (tick == 0) { s = "Starting";       }
+    if (tick == 1) { s = "Starting  .";    }
+    if (tick == 2) { s = "Starting  . .";  }
+    if (tick == 3) { s = "Starting  . . ."; }
+
+    p_img = Image.Text(s, 0.059, 0.608, 0.557, 0.65, "Sans 12");
+    progress.SetImage(p_img);
+    progress.SetX(screen_width / 2 - p_img.GetWidth() / 2);
+    progress.SetY(screen_height / 2 + 52);
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);

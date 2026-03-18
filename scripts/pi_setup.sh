@@ -241,14 +241,18 @@ if [[ "$UPDATE_ONLY" == "false" ]]; then
 # ---------------------------------------------------------------------------
 # 6. WiFi Access Point
 # ---------------------------------------------------------------------------
-step "6/7  Configuring WiFi Access Point"
+step "6/8  Configuring WiFi Access Point"
 
 bash "$CONFIG_DIR/setup_wifi_ap.sh"
 
 # ---------------------------------------------------------------------------
 # 7. UART overlays + touchscreen kiosk
 # ---------------------------------------------------------------------------
-step "7/7  Configuring UART overlays and touchscreen kiosk"
+step "7/8  Setting up boot splash screen"
+
+bash "$SCRIPT_DIR/setup_splash.sh"
+
+step "8/8  Configuring UART overlays and touchscreen kiosk"
 
 BOOT_CONFIG="/boot/firmware/config.txt"
 [[ -f "$BOOT_CONFIG" ]] || BOOT_CONFIG="/boot/config.txt"  # fallback for older Pi OS
@@ -282,6 +286,10 @@ xset -dpms          # disable display power management
 xset s noblank      # disable screen blanking
 xset s off          # disable screensaver
 unclutter -idle 1 -root &   # hide mouse cursor after 1s idle
+
+# Paint the root window the same dark colour as the boot splash so there is no
+# jarring flash between Plymouth → X desktop → Chromium.
+xsetroot -solid '#0d1117'
 
 # Wait for the MIDI Box web server to be ready
 until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 1; done

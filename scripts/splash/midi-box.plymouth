@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=MIDI Box
+Description=MIDI Box boot splash — dark theme with teal accent
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/midi-box
+ScriptFile=/usr/share/plymouth/themes/midi-box/midi-box.script
