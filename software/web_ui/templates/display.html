@@ -3,220 +3,939 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MIDI BOX — Connect</title>
+  <title>MIDI BOX</title>
   <style>
     :root {
-      --bg:     #0d1117;
-      --card:   #161b22;
-      --border: #2a3a5c;
-      --accent: #0f9b8e;
-      --text:   #e0e0e0;
-      --muted:  #8892a4;
-      --green:  #2ecc71;
+      --bg:       #0d1117;
+      --card:     #161b22;
+      --card2:    #1e2a45;
+      --border:   #2a3a5c;
+      --accent:   #0f9b8e;
+      --accent-h: #12c4b3;
+      --accent-d: rgba(15,155,142,0.15);
+      --text:     #e0e0e0;
+      --muted:    #8892a4;
+      --danger:   #e74c3c;
+      --danger-d: rgba(231,76,60,0.18);
+      --warn:     #f39c12;
+      --green:    #2ecc71;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    html, body {
+      width: 100vw; height: 100vh;
+      overflow: hidden;
+      font-family: 'SF Mono','Fira Code','Consolas',monospace;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 40px 24px;
-      gap: 0;
+      font-size: 13px;
     }
 
-    /* --- Brand --- */
+    /* ── Top bar ── */
+    .topbar {
+      height: 44px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
     .brand {
-      font-size: 32px;
+      font-size: 15px;
       font-weight: 700;
       color: var(--accent);
-      letter-spacing: 5px;
+      letter-spacing: 3px;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      flex-shrink: 0;
     }
 
-    .tagline {
-      font-size: 12px;
-      color: var(--muted);
-      letter-spacing: 2px;
+    .mode-badge {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1px;
       text-transform: uppercase;
-      margin-bottom: 44px;
+      background: var(--accent-d);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      padding: 2px 5px;
+      flex-shrink: 0;
     }
 
-    /* --- QR row --- */
-    .qr-row {
+    .topbar-status {
+      margin-left: auto;
       display: flex;
-      gap: 56px;
-      align-items: flex-start;
-      justify-content: center;
-      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 11px;
+      flex-shrink: 0;
     }
 
-    .qr-block {
+    .topbar-status span { display: flex; align-items: center; gap: 4px; }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 5px var(--accent);
+    }
+    .dot.red { background: var(--danger); box-shadow: 0 0 5px var(--danger); }
+
+    #tb-time { color: var(--text); font-weight: 600; font-size: 13px; }
+
+    /* ── Tab bar ── */
+    .tabbar {
+      height: 44px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-shrink: 0;
+    }
+
+    .tab-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Content area ── */
+    .content {
+      height: calc(480px - 48px - 44px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tab-pane {
+      display: none;
+      width: 100%; height: 100%;
+      padding: 16px;
+    }
+    .tab-pane.active { display: flex; }
+
+    /* ════════════════════════════════
+       TAB 1 — CONNECT
+    ════════════════════════════════ */
+    #tab-connect {
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .qr-col {
+      flex: 1;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 14px;
+      gap: 10px;
+    }
+
+    .qr-sep {
+      width: 1px;
+      background: var(--border);
+      margin: 8px 0;
     }
 
     .qr-step {
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 700;
-      letter-spacing: 2.5px;
+      letter-spacing: 2px;
       text-transform: uppercase;
       color: var(--accent);
     }
 
     .qr-img {
-      width: 200px;
-      height: 200px;
+      width: 170px; height: 170px;
       background: #fff;
-      border-radius: 14px;
-      padding: 6px;
+      border-radius: 12px;
+      padding: 5px;
       display: block;
     }
 
     .qr-title {
-      font-size: 17px;
+      font-size: 15px;
       font-weight: 600;
-      color: var(--text);
     }
 
     .qr-detail {
-      font-size: 13px;
+      font-size: 12px;
       color: var(--muted);
       text-align: center;
-      line-height: 1.7;
+      line-height: 1.8;
     }
 
     .qr-detail strong {
       color: var(--text);
       display: block;
-      font-size: 15px;
+      font-size: 14px;
     }
 
-    /* Divider between QR blocks */
-    .qr-sep {
-      width: 1px;
-      background: var(--border);
-      align-self: stretch;
-      margin: 28px 0;
-    }
-
-    /* --- Status bar --- */
-    .status-bar {
-      margin-top: 48px;
+    .connect-right {
+      width: 220px;
       display: flex;
-      gap: 32px;
-      align-items: center;
-      justify-content: center;
-      flex-wrap: wrap;
-      border-top: 1px solid var(--border);
-      padding-top: 20px;
-      width: 100%;
-      max-width: 640px;
+      flex-direction: column;
+      gap: 10px;
     }
 
-    .status-item {
+    .stat-card {
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
       display: flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 12px;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .stat-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
       color: var(--muted);
     }
 
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 5px var(--accent);
+    .stat-val {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
     }
 
-    #s-time {
-      font-size: 14px;
-      color: var(--text);
-      font-weight: 600;
-      margin-left: auto;
+    .stat-sub { font-size: 11px; color: var(--muted); }
+
+    .stat-row {
+      display: flex;
+      gap: 10px;
     }
+
+    .stat-row .stat-card { flex: 1; }
+
+    /* ════════════════════════════════
+       TAB 2 — CONTROL
+    ════════════════════════════════ */
+    #tab-control {
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .panic-btn {
+      width: 100%;
+      height: 100px;
+      background: var(--danger-d);
+      border: 2px solid var(--danger);
+      border-radius: 10px;
+      color: var(--danger);
+      font-family: inherit;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.1s, transform 0.08s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .panic-btn:active { transform: scale(0.98); background: rgba(231,76,60,0.35); }
+    .panic-btn.firing { background: rgba(231,76,60,0.35); color: #fff; }
+    .panic-btn.done   { background: var(--accent-d); border-color: var(--accent); color: var(--accent); }
+
+    .bpm-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+
+    .bpm-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .bpm-val {
+      font-size: 40px;
+      font-weight: 700;
+      color: var(--accent);
+      width: 96px;
+      text-align: center;
+      line-height: 1;
+    }
+
+    .bpm-sub {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .adj-btn {
+      width: 52px; height: 52px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 22px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .adj-btn:active { background: var(--accent-d); border-color: var(--accent); color: var(--accent); }
+
+    .preset-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+
+    .section-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .preset-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      overflow-y: auto;
+      flex: 1;
+      justify-content: center;
+      align-content: flex-start;
+    }
+
+    .preset-btn {
+      height: 48px;
+      padding: 0 20px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+
+    .preset-btn:hover { background: var(--accent-d); border-color: var(--accent); }
+    .preset-btn.active {
+      background: var(--accent-d);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .preset-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+
+    /* ════════════════════════════════
+       TAB 3 — SETTINGS
+    ════════════════════════════════ */
+    #tab-settings {
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .action-btn {
+      flex: 1;
+      height: 60px;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+
+    .action-btn:active { opacity: 0.8; }
+    .action-btn.warn-btn  { border-color: var(--warn); color: var(--warn); background: rgba(243,156,18,0.1); }
+    .action-btn.danger-btn { border-color: var(--danger); color: var(--danger); background: var(--danger-d); }
+    .action-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .sys-row {
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .sys-stat {
+      flex: 1;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .sys-stat .stat-label { margin-bottom: 2px; }
+
+    .bar-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent);
+      transition: width 0.4s;
+    }
+
+    .bar-fill.med  { background: var(--warn); }
+    .bar-fill.high { background: var(--danger); }
+
+    .sys-val {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .sys-val.med  { color: var(--warn); }
+    .sys-val.high { color: var(--danger); }
+
+    .log-box {
+      flex: 1;
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .log-line {
+      font-size: 10px;
+      line-height: 1.5;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .log-line.error   { color: var(--danger); }
+    .log-line.warning { color: var(--warn); }
+    .log-line.info    { color: var(--accent); }
+
+    /* ── Confirm modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.show { display: flex; }
+
+    .modal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 28px 20px;
+      width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .modal h3 { font-size: 15px; color: var(--text); }
+    .modal p  { font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+    .modal-actions { display: flex; gap: 10px; }
+
+    .modal-actions button {
+      flex: 1; height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn-cancel { background: var(--card2); color: var(--muted); }
+    .btn-confirm { background: var(--danger-d); border-color: var(--danger); color: var(--danger); }
   </style>
 </head>
 <body>
 
-  <div class="brand">MIDI BOX</div>
-  <div class="tagline">MIDI Router &mdash; Live Control</div>
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="brand">MIDI BOX</div>
+    <span class="mode-badge" id="tb-mode">STANDALONE</span>
+    <div class="topbar-status">
+      <span><span class="dot" id="tb-dot"></span><span id="tb-devices">—dev</span></span>
+      <span><span id="tb-routes">—rt</span></span>
+      <span id="tb-time">--:--</span>
+    </div>
+  </div>
 
-  <div class="qr-row">
+  <!-- Tab bar -->
+  <div class="tabbar">
+    <button class="tab-btn active" onclick="switchTab('connect')">⊞ Connect</button>
+    <button class="tab-btn"        onclick="switchTab('control')">⚡ Control</button>
+    <button class="tab-btn"        onclick="switchTab('settings')">⚙ Settings</button>
+  </div>
 
-    <div class="qr-block">
-      <div class="qr-step">Step 1</div>
-      <img src="/api/qr/wifi.svg" class="qr-img" alt="WiFi QR code">
-      <div class="qr-title">Join WiFi</div>
-      <div class="qr-detail" id="wifi-detail">
-        <strong>MIDI-BOX</strong>
-        Password: midibox123
+  <!-- Content -->
+  <div class="content">
+
+    <!-- TAB 1: Connect -->
+    <div class="tab-pane active" id="tab-connect">
+
+      <div class="qr-col">
+        <div class="qr-step">Step 1</div>
+        <img src="/api/qr/wifi.svg" class="qr-img" alt="WiFi QR">
+        <div class="qr-title">Join WiFi</div>
+        <div class="qr-detail" id="wifi-detail">
+          <strong id="wifi-ssid">MIDI-BOX</strong>
+          <span id="wifi-pass">midibox123</span>
+        </div>
       </div>
+
+      <div class="qr-sep"></div>
+
+      <div class="qr-col">
+        <div class="qr-step">Step 2</div>
+        <img src="/api/qr/url.svg" class="qr-img" alt="URL QR">
+        <div class="qr-title">Open URL</div>
+        <div class="qr-detail">
+          <strong id="conn-url">192.168.4.1:8080</strong>
+          <span>Open in browser</span>
+        </div>
+      </div>
+
+      <div class="qr-sep"></div>
+
+      <div class="connect-right">
+        <div class="stat-row">
+          <div class="stat-card">
+            <div class="stat-label">Devices</div>
+            <div class="stat-val" id="cr-devices">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Routes</div>
+            <div class="stat-val" id="cr-routes">—</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Preset</div>
+          <div class="stat-val" style="font-size:14px;word-break:break-all" id="cr-preset">no preset</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Clock</div>
+          <div class="stat-val" id="cr-bpm">— BPM</div>
+          <div class="stat-sub" id="cr-src">internal</div>
+        </div>
+      </div>
+
     </div>
 
-    <div class="qr-sep"></div>
+    <!-- TAB 2: Control -->
+    <div class="tab-pane" id="tab-control">
 
-    <div class="qr-block">
-      <div class="qr-step">Step 2</div>
-      <img src="/api/qr/url.svg" class="qr-img" alt="URL QR code">
-      <div class="qr-title">Open URL</div>
-      <div class="qr-detail" id="url-detail">
-        <strong>192.168.4.1:8080</strong>
-        Tap to open in Safari
+      <button class="panic-btn" id="panic-btn" onclick="doPanic()">
+        PANIC
+      </button>
+
+      <div class="bpm-row">
+        <div class="bpm-label">BPM</div>
+        <button class="adj-btn" onclick="adjustBpm(-5)" title="-5">−−</button>
+        <button class="adj-btn" onclick="adjustBpm(-1)" title="-1">−</button>
+        <div>
+          <div class="bpm-val" id="ctrl-bpm">—</div>
+          <div class="bpm-sub" id="ctrl-src">internal</div>
+        </div>
+        <button class="adj-btn" onclick="adjustBpm(1)"  title="+1">+</button>
+        <button class="adj-btn" onclick="adjustBpm(5)"  title="+5">++</button>
       </div>
+
+      <div class="preset-section">
+        <div class="section-label">Presets</div>
+        <div class="preset-grid" id="preset-grid">
+          <span class="preset-empty">Loading…</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: Settings -->
+    <div class="tab-pane" id="tab-settings">
+
+      <div class="action-row">
+        <button class="action-btn warn-btn" id="restart-btn" onclick="doRestart()">
+          Restart Service
+        </button>
+        <button class="action-btn danger-btn" onclick="confirmReboot()">
+          Reboot Pi
+        </button>
+      </div>
+
+      <div class="sys-row">
+        <div class="sys-stat">
+          <div class="stat-label">CPU</div>
+          <div class="sys-val" id="sys-cpu">—%</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-cpu" style="width:0%"></div></div>
+        </div>
+        <div class="sys-stat">
+          <div class="stat-label">RAM</div>
+          <div class="sys-val" id="sys-ram">—%</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-ram" style="width:0%"></div></div>
+        </div>
+        <div class="sys-stat">
+          <div class="stat-label">Temp</div>
+          <div class="sys-val" id="sys-temp">—°C</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-temp" style="width:0%"></div></div>
+        </div>
+        <div class="sys-stat">
+          <div class="stat-label">Uptime</div>
+          <div class="sys-val" style="font-size:12px;color:var(--muted)" id="sys-uptime">—</div>
+        </div>
+      </div>
+
+      <div class="log-box" id="log-box">
+        <div class="log-line muted">Loading logs…</div>
+      </div>
+
     </div>
 
   </div>
 
-  <div class="status-bar">
-    <div class="status-item">
-      <span class="status-dot"></span>
-      <span id="s-devices">— devices</span>
+  <!-- Reboot confirm modal -->
+  <div class="modal-overlay" id="reboot-modal">
+    <div class="modal">
+      <h3>Reboot Raspberry Pi?</h3>
+      <p>This will cut all MIDI routing for ~30 seconds while the Pi restarts.</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-confirm" onclick="doReboot()">Reboot</button>
+      </div>
     </div>
-    <div class="status-item">
-      <span class="status-dot"></span>
-      <span id="s-routes">— routes</span>
-    </div>
-    <div class="status-item">
-      <span class="status-dot"></span>
-      <span id="s-preset">no preset</span>
-    </div>
-    <span id="s-time">--:--</span>
   </div>
 
   <script>
-    // Load network info and update display
-    fetch('/api/network').then(r => r.json()).then(d => {
-      document.getElementById('wifi-detail').innerHTML =
-        `<strong>${d.ssid}</strong>Password: ${d.password}`;
-      document.getElementById('url-detail').innerHTML =
-        `<strong>${d.url}</strong>Open in Safari`;
-    }).catch(() => {});
+    // ── State ──
+    let currentBpm = 120;
+    let currentPreset = '';
+    let activeTab = localStorage.getItem('displayTab') || 'connect';
 
-    // Update status bar
-    function updateStatus() {
-      fetch('/api/settings').then(r => r.json()).then(d => {
-        document.getElementById('s-devices').textContent = `${d.total_devices} devices`;
-        document.getElementById('s-routes').textContent  = `${d.total_routes} routes`;
-        document.getElementById('s-preset').textContent  = d.preset || 'no preset';
-      }).catch(() => {});
-
-      const now = new Date();
-      document.getElementById('s-time').textContent =
-        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    // ── Tab switching ──
+    function switchTab(name) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      document.querySelectorAll('.tab-btn')[['connect','control','settings'].indexOf(name)].classList.add('active');
+      localStorage.setItem('displayTab', name);
+      activeTab = name;
+      if (name === 'control')  loadPresets();
+      if (name === 'settings') { loadSysStats(); loadLogs(); }
     }
 
-    updateStatus();
-    setInterval(updateStatus, 10000);
+    // Restore last tab on load
+    switchTab(activeTab);
+
+    // ── Top bar clock ──
+    function tickClock() {
+      const now = new Date();
+      document.getElementById('tb-time').textContent =
+        now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); // 24h, no AM/PM
+    }
+    tickClock();
+    setInterval(tickClock, 10000);
+
+    // ── Shared status (all tabs benefit) ──
+    async function loadStatus() {
+      try {
+        const [s, c, n] = await Promise.all([
+          fetch('/api/settings').then(r => r.json()),
+          fetch('/api/clock').then(r => r.json()),
+          fetch('/api/network').then(r => r.json()),
+        ]);
+
+        // Top bar
+        document.getElementById('tb-mode').textContent    = (s.mode || 'standalone').toUpperCase();
+        document.getElementById('tb-devices').textContent = `${s.total_devices ?? '—'}dev`;
+        document.getElementById('tb-routes').textContent  = `${s.total_routes ?? '—'}rt`;
+        document.getElementById('tb-preset').textContent  = s.preset || 'no preset';
+
+        // Connect tab
+        document.getElementById('wifi-ssid').textContent  = n.ssid     || 'MIDI-BOX';
+        document.getElementById('wifi-pass').textContent  = n.password || '';
+        document.getElementById('conn-url').textContent   = n.url      || '192.168.4.1:8080';
+        document.getElementById('cr-devices').textContent = s.total_devices ?? '—';
+        document.getElementById('cr-routes').textContent  = s.total_routes  ?? '—';
+        document.getElementById('cr-preset').textContent  = s.preset || 'no preset';
+        document.getElementById('cr-bpm').textContent     = `${c.bpm ?? '—'} BPM`;
+        document.getElementById('cr-src').textContent     = c.source  || 'internal';
+
+        // Control tab BPM
+        currentBpm = c.bpm ?? 120;
+        currentPreset = s.preset || '';
+        document.getElementById('ctrl-bpm').textContent = c.bpm ?? '—';
+        document.getElementById('ctrl-src').textContent = c.source || 'internal';
+
+        // Refresh preset active state if control tab visible
+        document.querySelectorAll('.preset-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.name === currentPreset);
+        });
+      } catch (_) {}
+    }
+
+    loadStatus();
+    setInterval(loadStatus, 10000);
+
+    // ── PANIC ──
+    async function doPanic() {
+      const btn = document.getElementById('panic-btn');
+      btn.classList.add('firing');
+      btn.textContent = 'Silencing…';
+      btn.disabled = true;
+      try { await fetch('/api/panic', { method: 'POST' }); } catch (_) {}
+      btn.classList.remove('firing');
+      btn.classList.add('done');
+      btn.textContent = 'All Notes Off';
+      setTimeout(() => {
+        btn.textContent = 'PANIC';
+        btn.classList.remove('done');
+        btn.disabled = false;
+      }, 2200);
+    }
+
+    // ── BPM ──
+    async function adjustBpm(delta) {
+      currentBpm = Math.max(20, Math.min(300, currentBpm + delta));
+      document.getElementById('ctrl-bpm').textContent = currentBpm;
+      try {
+        await fetch('/api/clock/bpm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bpm: currentBpm }),
+        });
+      } catch (_) {}
+    }
+
+    // ── Presets ──
+    async function loadPresets() {
+      const grid = document.getElementById('preset-grid');
+      try {
+        const data = await fetch('/api/presets').then(r => r.json());
+        const list = data.presets || [];
+        if (!list.length) {
+          grid.innerHTML = '<span class="preset-empty">No presets saved</span>';
+          return;
+        }
+        grid.innerHTML = '';
+        list.forEach(p => {
+          const btn = document.createElement('button');
+          btn.className = 'preset-btn' + (p === currentPreset ? ' active' : '');
+          btn.textContent = p;
+          btn.dataset.name = p;
+          btn.onclick = () => loadPreset(p);
+          grid.appendChild(btn);
+        });
+      } catch (_) {
+        grid.innerHTML = '<span class="preset-empty">Error loading presets</span>';
+      }
+    }
+
+    async function loadPreset(name) {
+      try {
+        await fetch(`/api/presets/${encodeURIComponent(name)}/load`, { method: 'POST' });
+        currentPreset = name;
+        document.querySelectorAll('.preset-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.name === name);
+        });
+        document.getElementById('tb-preset').textContent = name;
+        document.getElementById('cr-preset').textContent = name;
+      } catch (_) {}
+    }
+
+    // ── System stats ──
+    async function loadSysStats() {
+      try {
+        const s = await fetch('/api/system').then(r => r.json());
+        setBar('cpu',  s.cpu_percent  ?? 0);
+        setBar('ram',  s.ram_percent  ?? 0);
+        setBar('temp', s.cpu_temp_c   ?? 0, 100);
+        document.getElementById('sys-uptime').textContent = fmtUptime(s.uptime_seconds ?? 0);
+      } catch (_) {}
+    }
+
+    function setBar(id, val, max = 100) {
+      const pct = Math.min(100, (val / max) * 100);
+      const cls = pct >= 85 ? 'high' : pct >= 65 ? 'med' : '';
+      const fill = document.getElementById('bar-' + id);
+      const label = document.getElementById('sys-' + id);
+      fill.style.width = pct + '%';
+      fill.className = 'bar-fill' + (cls ? ' ' + cls : '');
+      label.className = 'sys-val' + (cls ? ' ' + cls : '');
+      if (id === 'temp') {
+        label.textContent = val ? `${Math.round(val)}°C` : '—°C';
+      } else {
+        label.textContent = val ? `${Math.round(val)}%` : '—%';
+      }
+    }
+
+    function fmtUptime(secs) {
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      if (h > 24) return `${Math.floor(h/24)}d ${h%24}h`;
+      return `${h}h ${m}m`;
+    }
+
+    // ── Logs ──
+    async function loadLogs() {
+      const box = document.getElementById('log-box');
+      try {
+        const data = await fetch('/api/logs?limit=10').then(r => r.json());
+        const lines = data.logs || [];
+        if (!lines.length) { box.innerHTML = '<div class="log-line">No logs yet</div>'; return; }
+        box.innerHTML = '';
+        lines.forEach(entry => {
+          const el = document.createElement('div');
+          const level = (entry.level || '').toLowerCase();
+          const ts = entry.time ? entry.time.slice(11, 19) : '';
+          el.className = 'log-line ' + (['error','warning','info'].includes(level) ? level : '');
+          el.textContent = `${ts} [${(entry.level||'').padEnd(5)}] ${entry.message || entry}`;
+          box.appendChild(el);
+        });
+        box.scrollTop = box.scrollHeight;
+      } catch (_) {
+        box.innerHTML = '<div class="log-line">Could not load logs</div>';
+      }
+    }
+
+    // ── Restart service ──
+    async function doRestart() {
+      const btn = document.getElementById('restart-btn');
+      btn.disabled = true;
+
+      const set = (txt, cls) => {
+        btn.textContent = txt;
+        btn.className = 'action-btn ' + cls;
+      };
+
+      set('Restarting…', 'warn-btn');
+      try { await fetch('/api/system/restart', { method: 'POST' }); } catch (_) {}
+
+      await new Promise(r => setTimeout(r, 3000));
+      set('Reconnecting…', 'warn-btn');
+
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        try {
+          const r = await fetch('/api/settings');
+          if (r.ok) {
+            clearInterval(poll);
+            set('Back Online', 'action-btn');
+            btn.style.borderColor = 'var(--green)';
+            btn.style.color = 'var(--green)';
+            setTimeout(() => {
+              btn.disabled = false;
+              btn.style.borderColor = '';
+              btn.style.color = '';
+              btn.className = 'action-btn warn-btn';
+              btn.textContent = 'Restart Service';
+              loadStatus();
+            }, 1500);
+          }
+        } catch (_) {
+          if (tries > 40) {
+            clearInterval(poll);
+            set('Timeout', 'danger-btn');
+            btn.disabled = false;
+          }
+        }
+      }, 500);
+    }
+
+    // ── Reboot Pi ──
+    function confirmReboot() {
+      document.getElementById('reboot-modal').classList.add('show');
+    }
+
+    function closeModal() {
+      document.getElementById('reboot-modal').classList.remove('show');
+    }
+
+    async function doReboot() {
+      closeModal();
+      const btn = document.querySelector('.action-btn.danger-btn');
+      btn.textContent = 'Rebooting…';
+      btn.disabled = true;
+      try { await fetch('/api/system/reboot', { method: 'POST' }); } catch (_) {}
+      // Pi will go offline; show reconnecting after 30s
+      setTimeout(() => {
+        btn.textContent = 'Reconnecting…';
+        let tries = 0;
+        const poll = setInterval(async () => {
+          tries++;
+          try {
+            const r = await fetch('/api/settings');
+            if (r.ok) {
+              clearInterval(poll);
+              btn.textContent = '✓ Back Online';
+              setTimeout(() => location.reload(), 1000);
+            }
+          } catch (_) {
+            if (tries > 60) { clearInterval(poll); btn.textContent = 'Reboot Pi'; btn.disabled = false; }
+          }
+        }, 1000);
+      }, 30000);
+    }
+
+    // ── Settings tab auto-refresh ──
+    setInterval(() => {
+      if (activeTab === 'settings') { loadSysStats(); loadLogs(); }
+    }, 5000);
   </script>
 
 </body>

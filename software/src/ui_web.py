@@ -974,6 +974,16 @@ def create_app(bridge):
         """Restart the MIDI Box service — sends SIGTERM to MIDI engine process."""
         return jsonify(_cmd("system.restart"))
 
+    @app.route("/api/system/reboot", methods=["POST"])
+    def api_system_reboot():
+        """Reboot the Raspberry Pi."""
+        import threading, subprocess
+        def _reboot():
+            import time; time.sleep(0.5)
+            subprocess.run(["sudo", "reboot"], check=False)
+        threading.Thread(target=_reboot, daemon=True).start()
+        return jsonify({"ok": True, "message": "Rebooting..."})
+
     # ---------------------------------------------------------------
     # API: Software Updates
     # ---------------------------------------------------------------

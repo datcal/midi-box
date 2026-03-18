@@ -1,0 +1,21 @@
+{
+  "name": "Archura",
+  "description": "",
+  "routes": [
+    {
+      "from": "KeyStep",
+      "to": "MODEL D",
+      "filter": {},
+      "name": "KeyStep -> MODEL D",
+      "enabled": true
+    },
+    {
+      "from": "KeyStep",
+      "to": "Boutiq",
+      "filter": {},
+      "name": "KeyStep -> Boutiq",
+      "enabled": true
+    }
+  ],
+  "clock_source": null
+}

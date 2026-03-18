@@ -195,13 +195,14 @@ log "Service installed and enabled: midi-box.service"
 info "  Control: sudo systemctl {start|stop|restart|status} midi-box"
 info "  Logs:    sudo journalctl -u midi-box -f"
 
-# Sudoers: allow the service user to update hostapd config and restart it
-# without a password — needed for the web UI WiFi credential editor.
+# Sudoers: allow the service user to update hostapd config, restart it,
+# and reboot the Pi without a password — needed for the web UI.
 SUDOERS_FILE="/etc/sudoers.d/midi-box-wifi"
 cat > "$SUDOERS_FILE" << EOF
 # MIDI Box — allow web UI to update WiFi AP credentials without a password
 $SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/hostapd/hostapd.conf
 $SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart hostapd
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/reboot
 EOF
 chmod 0440 "$SUDOERS_FILE"
 log "Sudoers entry written: $SUDOERS_FILE"
@@ -299,29 +300,35 @@ chmod +x "$XINITRC"
 chown "$SERVICE_USER:$SERVICE_USER" "$XINITRC"
 log "Kiosk .xinitrc written for user $SERVICE_USER"
 
-# Systemd service to start the kiosk X session after midi-box is running
-KIOSK_SERVICE="/etc/systemd/system/midi-box-kiosk.service"
-cat > "$KIOSK_SERVICE" << EOF
-[Unit]
-Description=MIDI Box Kiosk (Chromium on touchscreen)
-After=midi-box.service graphical.target
-Wants=midi-box.service
-
+# Autologin on tty1: getty override so datcal logs in automatically on boot
+GETTY_OVERRIDE_DIR="/etc/systemd/system/getty@tty1.service.d"
+mkdir -p "$GETTY_OVERRIDE_DIR"
+cat > "$GETTY_OVERRIDE_DIR/autologin.conf" << EOF
 [Service]
-Type=simple
-User=$SERVICE_USER
-PAMName=login
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u "$SERVICE_USER" 2>/dev/null || echo 1000)
-ExecStart=/usr/bin/startx /home/$SERVICE_USER/.xinitrc -- :0 vt7
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=graphical.target
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $SERVICE_USER --noclear %I \$TERM
 EOF
+log "getty autologin configured for user $SERVICE_USER on tty1"
+
+# Trigger startx from bash_profile when on tty1 (idempotent)
+BASH_PROFILE="/home/$SERVICE_USER/.bash_profile"
+STARTX_LINE='[[ -z $DISPLAY && $XDG_VTNR -eq 1 ]] && exec startx'
+if ! grep -qF 'exec startx' "$BASH_PROFILE" 2>/dev/null; then
+    echo "$STARTX_LINE" >> "$BASH_PROFILE"
+    chown "$SERVICE_USER:$SERVICE_USER" "$BASH_PROFILE"
+    log "startx trigger added to $BASH_PROFILE"
+else
+    log "startx trigger already present in $BASH_PROFILE — skipping"
+fi
+
+# Remove the old broken kiosk service if it exists
+if [[ -f /etc/systemd/system/midi-box-kiosk.service ]]; then
+    systemctl disable midi-box-kiosk.service 2>/dev/null || true
+    rm -f /etc/systemd/system/midi-box-kiosk.service
+    log "Removed old midi-box-kiosk.service"
+fi
+
 systemctl daemon-reload
-systemctl enable midi-box-kiosk.service
-log "Kiosk service installed: midi-box-kiosk.service"
 
 # ---------------------------------------------------------------------------
 # Done!
