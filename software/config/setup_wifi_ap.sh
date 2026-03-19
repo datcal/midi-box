@@ -73,6 +73,9 @@ After=sys-subsystem-net-devices-wlan0.device network.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Delete stale uap0 if it exists from a previous boot (prevents "RTNETLINK: File exists")
+ExecStartPre=-/sbin/ip link set ${AP_IFACE} down
+ExecStartPre=-/sbin/iw dev ${AP_IFACE} del
 # Create the virtual AP interface
 ExecStart=/sbin/iw dev wlan0 interface add ${AP_IFACE} type __ap
 # Bring it up and assign the static IP
@@ -94,8 +97,17 @@ echo "[4/6] Configuring dnsmasq..."
 mv /etc/dnsmasq.conf /etc/dnsmasq.conf.bak 2>/dev/null || true
 cat > /etc/dnsmasq.conf << EOF
 # MIDI Box dnsmasq config
+#
+# IMPORTANT: use bind-dynamic instead of bind-interfaces!
+# bind-interfaces requires the interface to exist at startup.  Since uap0 is a
+# virtual AP created AFTER boot by midi-box-ap-iface.service, bind-interfaces
+# silently falls back to binding ALL interfaces — which hijacks DNS on wlan0
+# and breaks the home WiFi connection.  bind-dynamic watches for new interfaces
+# and only attaches to the configured one when it appears.
 interface=${AP_IFACE}
-bind-interfaces
+bind-dynamic
+except-interface=wlan0
+listen-address=${AP_IP}
 dhcp-range=${DHCP_START},${DHCP_END},${NETMASK},24h
 
 # Do NOT touch .local — it belongs to mDNS/Bonjour (Avahi + zeroconf)
@@ -147,8 +159,28 @@ if [ -f /etc/avahi/avahi-daemon.conf ]; then
 fi
 systemctl enable avahi-daemon
 
+# --- Ensure dnsmasq and hostapd wait for uap0 to exist ---
+# Use Wants (not Requires) — if the AP interface service fails for any reason
+# (e.g. uap0 already exists from a previous attempt), Wants lets dnsmasq/hostapd
+# still try to start. Requires would cascade-fail and kill the entire AP stack.
+echo "[7/8] Ordering dnsmasq/hostapd after uap0 creation..."
+mkdir -p /etc/systemd/system/dnsmasq.service.d
+cat > /etc/systemd/system/dnsmasq.service.d/midi-box-after-ap.conf << EOF
+[Unit]
+After=midi-box-ap-iface.service
+Wants=midi-box-ap-iface.service
+EOF
+
+mkdir -p /etc/systemd/system/hostapd.service.d
+cat > /etc/systemd/system/hostapd.service.d/midi-box-after-ap.conf << EOF
+[Unit]
+After=midi-box-ap-iface.service
+Wants=midi-box-ap-iface.service
+EOF
+
 # --- Enable services on boot ---
-echo "[7/7] Enabling services..."
+echo "[8/8] Enabling services..."
+systemctl daemon-reload
 systemctl unmask hostapd
 systemctl enable hostapd
 systemctl enable dnsmasq

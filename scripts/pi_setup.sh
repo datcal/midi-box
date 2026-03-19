@@ -35,6 +35,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 WIFI_COUNTRY="${WIFI_COUNTRY:-US}"   # Your country code (TR, GB, DE, FR, etc.)
 SERVICE_USER="${SERVICE_USER:-$(logname 2>/dev/null || echo pi)}"
+HOME_WIFI_SSID="${HOME_WIFI_SSID:-}"   # Optional: home WiFi SSID for internet access
+HOME_WIFI_PASS="${HOME_WIFI_PASS:-}"   # Optional: home WiFi password
 
 # --update-only: skip WiFi AP, UART overlays, kiosk, and reboot prompt.
 # Used when pi_setup.sh is called from update.sh for system-level upgrades.
@@ -248,6 +250,17 @@ bash "$CONFIG_DIR/setup_wifi_ap.sh"
 # ---------------------------------------------------------------------------
 # 7. UART overlays + touchscreen kiosk
 # ---------------------------------------------------------------------------
+# Connect to home WiFi via NetworkManager (optional — for SSH / internet access)
+if [[ -n "$HOME_WIFI_SSID" ]]; then
+    info "Connecting wlan0 to home WiFi: $HOME_WIFI_SSID"
+    nmcli device wifi connect "$HOME_WIFI_SSID" password "$HOME_WIFI_PASS" ifname wlan0 \
+        && log "Connected to $HOME_WIFI_SSID on wlan0" \
+        || warn "Could not connect to $HOME_WIFI_SSID — configure manually: nmcli device wifi connect SSID password PASS"
+else
+    info "No HOME_WIFI_SSID set — skipping home WiFi. To add later:"
+    info "  sudo nmcli device wifi connect \"YourNetwork\" password \"YourPass\""
+fi
+
 step "7/8  Setting up boot splash screen"
 
 bash "$SCRIPT_DIR/setup_splash.sh"
@@ -276,6 +289,13 @@ fi
 
 # Disable Bluetooth service (UART0 is now used for MIDI)
 systemctl disable bluetooth 2>/dev/null && log "Bluetooth disabled (UART0 reserved for MIDI)" || true
+
+# Allow any user to start X — needed because the default Xwrapper "console" check
+# relies on systemd-logind seat assignment, which can fail when the kernel console
+# is redirected to a different tty (console=tty3 for splash screen).
+# Safe on a dedicated kiosk device.
+echo "allowed_users=anybody" > /etc/X11/Xwrapper.config
+log "Xwrapper.config set to allowed_users=anybody"
 
 # Kiosk: create ~/.xinitrc to launch Chromium fullscreen on the touchscreen
 XINITRC="/home/$SERVICE_USER/.xinitrc"
@@ -318,16 +338,31 @@ ExecStart=-/sbin/agetty --autologin $SERVICE_USER --noclear %I \$TERM
 EOF
 log "getty autologin configured for user $SERVICE_USER on tty1"
 
-# Trigger startx from bash_profile when on tty1 (idempotent)
+# Suppress login banner (motd, last-login line) — hushlogin makes the autologin silent
+touch "/home/$SERVICE_USER/.hushlogin"
+chown "$SERVICE_USER:$SERVICE_USER" "/home/$SERVICE_USER/.hushlogin"
+log "Created .hushlogin for silent autologin"
+
+# Trigger startx from bash_profile when on tty1 (idempotent).
+# - 'clear' wipes the tty so no shell text flashes between Plymouth and X
+# - '>/dev/null 2>&1' suppresses X server startup messages
+#
+# NOTE: Do NOT use sed to update this line — the '&' characters in the startx
+# command are interpreted as sed back-references and corrupt the file.
+# Instead, remove any old startx line with grep -v, then append the new one.
 BASH_PROFILE="/home/$SERVICE_USER/.bash_profile"
-STARTX_LINE='[[ -z $DISPLAY && $XDG_VTNR -eq 1 ]] && exec startx'
-if ! grep -qF 'exec startx' "$BASH_PROFILE" 2>/dev/null; then
-    echo "$STARTX_LINE" >> "$BASH_PROFILE"
-    chown "$SERVICE_USER:$SERVICE_USER" "$BASH_PROFILE"
-    log "startx trigger added to $BASH_PROFILE"
-else
-    log "startx trigger already present in $BASH_PROFILE — skipping"
+STARTX_LINE='[[ -z $DISPLAY && $XDG_VTNR -eq 1 ]] && { clear; exec startx >/dev/null 2>&1; }'
+
+# Remove any existing startx line (safe: grep -v writes to temp file first)
+if grep -qF 'exec startx' "$BASH_PROFILE" 2>/dev/null; then
+    grep -v 'exec startx' "$BASH_PROFILE" > "$BASH_PROFILE.tmp"
+    mv "$BASH_PROFILE.tmp" "$BASH_PROFILE"
+    log "Removed old startx line from $BASH_PROFILE"
 fi
+# Append the new silent version
+echo "$STARTX_LINE" >> "$BASH_PROFILE"
+chown "$SERVICE_USER:$SERVICE_USER" "$BASH_PROFILE"
+log "startx trigger written to $BASH_PROFILE"
 
 # Remove the old broken kiosk service if it exists
 if [[ -f /etc/systemd/system/midi-box-kiosk.service ]]; then

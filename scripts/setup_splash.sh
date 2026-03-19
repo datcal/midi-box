@@ -68,6 +68,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # 4. Patch cmdline.txt — add quiet splash and suppress cursor/penguin logos
+#    Also redirect console from tty1 → tty3 so systemd service messages
+#    (the [OK] lines) go to a non-visible terminal instead of overlapping Plymouth
 # ---------------------------------------------------------------------------
 CMDLINE="/boot/firmware/cmdline.txt"
 [[ -f "$CMDLINE" ]] || CMDLINE="/boot/cmdline.txt"   # older Pi OS fallback
@@ -81,26 +83,53 @@ else
     CURRENT="$(cat "$CMDLINE")"
     PATCHED="$CURRENT"
 
+    # Remove serial console — it forces Plymouth into text-only "details" mode
+    # (Plymouth assumes serial console = headless system, skips graphical splash)
+    PATCHED="$(echo "$PATCHED" | sed 's/console=serial0,[0-9]* //')"
+
+    # Move kernel console from tty1 → tty3 so systemd [OK] messages go to an
+    # invisible terminal.  The kiosk autologin still works on tty1 — it's driven
+    # by getty@tty1, which is independent of the kernel console parameter.
+    PATCHED="$(echo "$PATCHED" | sed 's/console=tty1/console=tty3/')"
+
     # Add flags only if not already present
-    echo "$CURRENT" | grep -qw "quiet"                    || PATCHED="$PATCHED quiet"
-    echo "$CURRENT" | grep -qw "splash"                   || PATCHED="$PATCHED splash"
-    echo "$CURRENT" | grep -qw "loglevel"                 || PATCHED="$PATCHED loglevel=3"
-    echo "$CURRENT" | grep -qw "vt.global_cursor_default" || PATCHED="$PATCHED vt.global_cursor_default=0"
-    echo "$CURRENT" | grep -qw "logo.nologo"              || PATCHED="$PATCHED logo.nologo"
+    echo "$PATCHED" | grep -qw "quiet"                    || PATCHED="$PATCHED quiet"
+    echo "$PATCHED" | grep -qw "splash"                   || PATCHED="$PATCHED splash"
+    echo "$PATCHED" | grep -qw "loglevel"                 || PATCHED="$PATCHED loglevel=3"
+    echo "$PATCHED" | grep -qw "vt.global_cursor_default" || PATCHED="$PATCHED vt.global_cursor_default=0"
+    echo "$PATCHED" | grep -qw "logo.nologo"              || PATCHED="$PATCHED logo.nologo"
+    echo "$PATCHED" | grep -qw "systemd.show_status"      || PATCHED="$PATCHED systemd.show_status=0"
 
     # Strip trailing whitespace and write back as a single line (required format)
     echo "${PATCHED%% }" | tr -s ' ' > "$CMDLINE"
-    log "Patched $CMDLINE (quiet splash loglevel=3 vt.global_cursor_default=0 logo.nologo)"
+    log "Patched $CMDLINE"
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Rebuild initramfs so Plymouth is available from early boot
+# 5. Patch config.txt — disable Pi's early GPU rainbow square
 # ---------------------------------------------------------------------------
-info "Rebuilding initramfs (this may take ~30 seconds)..."
-update-initramfs -u 2>&1 | tail -3
+CONFIG="/boot/firmware/config.txt"
+[[ -f "$CONFIG" ]] || CONFIG="/boot/config.txt"
+
+if [[ -f "$CONFIG" ]]; then
+    if grep -q "disable_splash" "$CONFIG"; then
+        sed -i 's/disable_splash=0/disable_splash=1/' "$CONFIG"
+    else
+        echo "disable_splash=1" >> "$CONFIG"
+    fi
+    log "Disabled Pi GPU rainbow splash in $CONFIG"
+else
+    warn "Could not find config.txt — skipping GPU splash disable"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Rebuild initramfs for ALL installed kernels so every boot path has Plymouth
+# ---------------------------------------------------------------------------
+info "Rebuilding initramfs for all kernels (this may take ~60 seconds)..."
+update-initramfs -u -k all 2>&1 | tail -5
 log "initramfs rebuilt"
 
 echo
 log "Boot splash setup complete — changes take effect on next reboot"
 info "  Theme location : $THEME_DST"
-info "  To preview now : sudo plymouthd --debug; sudo plymouth --show-splash; sleep 5; sudo plymouth quit"
+info "  To preview    : sudo plymouthd & sleep 1 && sudo plymouth --show-splash && sleep 6 && sudo plymouth quit"
