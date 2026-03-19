@@ -67,9 +67,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Patch cmdline.txt — add quiet splash and suppress cursor/penguin logos
-#    Also redirect console from tty1 → tty3 so systemd service messages
-#    (the [OK] lines) go to a non-visible terminal instead of overlapping Plymouth
+# 4. Patch cmdline.txt — silence boot text, enable Plymouth graphical splash
+#    IMPORTANT: Do NOT change console=tty1 — the kiosk autologin needs it.
+#    Instead we suppress text with systemd.show_status=0 and quiet/loglevel.
 # ---------------------------------------------------------------------------
 CMDLINE="/boot/firmware/cmdline.txt"
 [[ -f "$CMDLINE" ]] || CMDLINE="/boot/cmdline.txt"   # older Pi OS fallback
@@ -87,15 +87,14 @@ else
     # (Plymouth assumes serial console = headless system, skips graphical splash)
     PATCHED="$(echo "$PATCHED" | sed 's/console=serial0,[0-9]* //')"
 
-    # Move kernel console from tty1 → tty3 so systemd [OK] messages go to an
-    # invisible terminal.  The kiosk autologin still works on tty1 — it's driven
-    # by getty@tty1, which is independent of the kernel console parameter.
-    PATCHED="$(echo "$PATCHED" | sed 's/console=tty1/console=tty3/')"
+    # Ensure console stays on tty1 (kiosk autologin depends on it)
+    # If somehow set to tty3 (which breaks kiosk), revert it
+    PATCHED="$(echo "$PATCHED" | sed 's/console=tty3/console=tty1/')"
 
     # Add flags only if not already present
     echo "$PATCHED" | grep -qw "quiet"                    || PATCHED="$PATCHED quiet"
     echo "$PATCHED" | grep -qw "splash"                   || PATCHED="$PATCHED splash"
-    echo "$PATCHED" | grep -qw "loglevel"                 || PATCHED="$PATCHED loglevel=3"
+    echo "$PATCHED" | grep -qw "loglevel"                 || PATCHED="$PATCHED loglevel=0"
     echo "$PATCHED" | grep -qw "vt.global_cursor_default" || PATCHED="$PATCHED vt.global_cursor_default=0"
     echo "$PATCHED" | grep -qw "logo.nologo"              || PATCHED="$PATCHED logo.nologo"
     echo "$PATCHED" | grep -qw "systemd.show_status"      || PATCHED="$PATCHED systemd.show_status=0"
@@ -123,7 +122,45 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Rebuild initramfs for ALL installed kernels so every boot path has Plymouth
+# 6. Black out tty1 before Plymouth quits — prevents [OK] text flash
+#    systemd writes service status behind the Plymouth splash; when Plymouth
+#    quits, those messages briefly appear before X starts. This drop-in
+#    clears tty1 to black right before Plymouth exits.
+# ---------------------------------------------------------------------------
+info "Installing plymouth-quit blackout drop-in..."
+DROPIN_DIR="/etc/systemd/system/plymouth-quit.service.d"
+mkdir -p "$DROPIN_DIR"
+cat > "$DROPIN_DIR/blackout.conf" << 'DROPEOF'
+[Service]
+ExecStartPre=/bin/sh -c '/usr/bin/setterm --foreground black --background black --clear all --cursor off --term linux </dev/tty1 >/dev/tty1'
+DROPEOF
+systemctl daemon-reload
+log "plymouth-quit blackout drop-in installed"
+
+# ---------------------------------------------------------------------------
+# 7. Switch to blank VT on shutdown — hides all service stop messages
+# ---------------------------------------------------------------------------
+info "Installing shutdown blackout service..."
+cat > /etc/systemd/system/midi-box-shutdown-blackout.service << 'SVCEOF'
+[Unit]
+Description=Switch to blank VT on shutdown to hide service stop messages
+DefaultDependencies=no
+Before=shutdown.target reboot.target poweroff.target halt.target
+Conflicts=getty@tty12.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/chvt 12
+
+[Install]
+WantedBy=reboot.target poweroff.target halt.target
+SVCEOF
+systemctl daemon-reload
+systemctl enable midi-box-shutdown-blackout.service 2>/dev/null
+log "Shutdown blackout service installed"
+
+# ---------------------------------------------------------------------------
+# 8. Rebuild initramfs for ALL installed kernels so every boot path has Plymouth
 # ---------------------------------------------------------------------------
 info "Rebuilding initramfs for all kernels (this may take ~60 seconds)..."
 update-initramfs -u -k all 2>&1 | tail -5
