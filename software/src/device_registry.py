@@ -137,8 +137,8 @@ class DeviceRegistry:
         return device
 
     def register_hardware_device(self, serial_port: str):
-        """Register a hardware MIDI device (SC16IS752 / native UART)."""
-        port_key = Path(serial_port).name  # e.g., "ttySC0"
+        """Register a hardware MIDI device (Pi native UART)."""
+        port_key = Path(serial_port).name  # e.g., "ttyAMA0"
         if port_key in self.hardware_ports:
             info = self.hardware_ports[port_key]
             name = info["name"]

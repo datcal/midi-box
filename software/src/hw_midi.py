@@ -12,6 +12,7 @@ Required /boot/firmware/config.txt overlays:
 
 import threading
 import logging
+import time
 from pathlib import Path
 
 import serial
@@ -104,48 +105,26 @@ class HardwareMidiPort:
 class HardwareMidi:
     """Manages all hardware MIDI ports."""
 
-    # Pi native UART devices (enabled via device tree overlays)
-    DEFAULT_PORTS = [
-        ("/dev/ttyAMA0", "MS-20 Mini", "out"),  # UART0 → GPIO 14 (disable-bt overlay)
-        ("/dev/ttyAMA2", "Volca 1",    "out"),  # UART3 → GPIO 4  (uart3 overlay)
-        ("/dev/ttyAMA3", "Volca 2",    "out"),  # UART4 → GPIO 8  (uart4 overlay)
-        ("/dev/ttyAMA4", "Volca 3",    "out"),  # UART5 → GPIO 12 (uart5 overlay)
-    ]
-
     def __init__(self):
         self.ports: dict[str, HardwareMidiPort] = {}
         self._read_thread: threading.Thread | None = None
         self._running = False
         self._message_callback = None
 
-    def scan_ports(self) -> list[tuple[str, str, str]]:
-        """Check which hardware serial ports actually exist."""
-        available = []
-        for device_path, default_name, direction in self.DEFAULT_PORTS:
-            if Path(device_path).exists():
-                available.append((device_path, default_name, direction))
-                logger.debug(f"Found hardware port: {device_path}")
-            else:
-                logger.debug(f"Hardware port not found: {device_path}")
-        return available
-
-    def open_all(self, port_config: dict[str, dict] = None) -> list[HardwareMidiPort]:
+    def open_all(self, port_config: dict[str, dict]) -> list[HardwareMidiPort]:
         """
-        Open all available hardware MIDI ports.
-        port_config maps device path basenames to {name, direction} overrides.
+        Open all hardware MIDI ports defined in devices.yaml.
+        port_config maps device basenames (e.g. "ttyAMA0") to config dicts.
         """
         opened = []
-        for device_path, default_name, default_dir in self.scan_ports():
-            basename = Path(device_path).name
+        for basename, cfg in port_config.items():
+            device_path = f"/dev/{basename}"
+            name = cfg.get("name", basename)
+            direction = cfg.get("direction", "out")
 
-            # Apply config overrides if provided
-            if port_config and basename in port_config:
-                cfg = port_config[basename]
-                name = cfg.get("name", default_name)
-                direction = cfg.get("direction", default_dir)
-            else:
-                name = default_name
-                direction = default_dir
+            if not Path(device_path).exists():
+                logger.debug(f"Hardware port not found: {device_path}")
+                continue
 
             port = HardwareMidiPort(device_path, name, direction)
             if port.open():

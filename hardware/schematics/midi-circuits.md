@@ -14,34 +14,43 @@
 One circuit per port × 4. Pi GPIO TX pin drives it directly at 3.3V logic — no level shifter needed.
 
 ```
-                         +5V
-                          │
-                     ┌────┴────┐
-                     │  220 ohm │
-                     └────┬────┘
-                          │
-                          ├──────────── DIN Pin 4 (Source)
-                          │
-    UART TX ─────┬────────┘
-    (3.3V GPIO)  │
-            ┌────┴────┐
-            │  220 ohm │
-            └────┬────┘
-                 │
-                 └───────────────── DIN Pin 5 (Sink)
+    Schematic (one per port):
 
+         +5V Rail                          Pi UART TX
+            │                              (GPIO, 3.3V logic)
+           [R1]  220Ω                          │
+            │                                 [R2]  220Ω
+            │                                  │
+        DIN-5 Pin 4 (Source)            DIN-5 Pin 5 (Sink)
+            │                                  │
+            │          ┌──────────────┐        │
+            └──────────┤  MIDI Cable  ├────────┘
+                       │ (to receiver │
+                       │ optocoupler) │
+                       └──────────────┘
 
-    DIN Pin 2 ──── Shield / Ground (optional, connected to cable shield)
-    DIN Pin 1, 3 ── Not connected
+    DIN-5 Pin 2 ─── Shield / Ground (optional, cable shield)
+    DIN-5 Pin 1, 3 ─── Not connected
 ```
 
-### How it works:
-- When TX is HIGH (idle): no current flows
-- When TX is LOW (data): current flows 5V → 220Ω → DIN pin 4 → receiver optocoupler → DIN pin 5 → 220Ω → TX (LOW = GND)
-- ~8.6mA loop at 5V: (5V - 1.2V drop) / (220 + 220) — within MIDI spec
+```
+    Current flow when transmitting (TX = LOW):
 
-### 3.3V GPIO note:
-Pi GPIO outputs 3.3V when HIGH. Since the circuit's current only flows when TX is LOW (sinking to GND), the idle-high voltage level doesn't affect MIDI signal integrity.
+    +5V ──→ R1 (220Ω) ──→ Pin 4 ──→ [receiver optocoupler] ──→ Pin 5 ──→ R2 (220Ω) ──→ TX (LOW = GND)
+
+    Loop current: (5V - ~1.2V opto drop) / (220Ω + 220Ω) ≈ 8.6 mA — within MIDI spec
+```
+
+### How it works
+
+| TX State | What happens |
+|----------|-------------|
+| **HIGH** (idle, 3.3V) | No significant voltage difference across the loop — no current flows |
+| **LOW** (data, ~0V) | TX pin sinks to GND → current flows through the loop → optocoupler activates |
+
+### 3.3V GPIO note
+
+Pi GPIO outputs 3.3V when HIGH. Since current only flows when TX is LOW (sinking to GND), the 3.3V idle level doesn't affect MIDI signal integrity. The driving force is always the +5V rail, not the GPIO output voltage.
 
 ---
 
@@ -56,13 +65,10 @@ Pi GPIO outputs 3.3V when HIGH. Since the circuit's current only flows when TX i
                         │ GPIO 8  (UART4 TX) ─┼──── MIDI OUT → Volca #2
                         │ GPIO 12 (UART5 TX) ─┼──── MIDI OUT → Volca #3
                         │                     │
-                        │ GPIO 2  (SDA) ──────┼──── I2C Bus (touchscreen touch)
-                        │ GPIO 3  (SCL) ──────┼──── I2C Bus
-                        │                     │
                         │ GPIO 2/4 (5V) ──────┼──── Buck converter 5V in
                         │ GPIO 6   (GND) ─────┼──── Buck converter GND
                         │                     │
-                        │ DSI connector ──────┼──── 7" Touchscreen ribbon
+                        │ DSI connector ──────┼──── 5" Touchscreen (display + touch)
                         └─────────────────────┘
 ```
 

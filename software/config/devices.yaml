@@ -59,35 +59,39 @@ usb_devices:
     default_channel: 10
 
 
-# Hardware ports (SC16IS752 UARTs + Pi native UART)
-# Keys are the serial device basename (e.g., ttySC0)
+# Hardware ports (Pi native UARTs via device tree overlays)
+# Keys are the serial device basename (e.g., ttyAMA0)
+#
+# GPIO → UART → Device mapping:
+#   GPIO 14 → UART0 → /dev/ttyAMA0  (dtoverlay=disable-bt)
+#   GPIO 4  → UART3 → /dev/ttyAMA2  (dtoverlay=uart3)
+#   GPIO 8  → UART4 → /dev/ttyAMA3  (dtoverlay=uart4)
+#   GPIO 12 → UART5 → /dev/ttyAMA4  (dtoverlay=uart5)
 hardware_ports:
-  ttySC0:
+  ttyAMA0:
     name: "MS-20 Mini"
+    gpio: 14
     direction: out
     type: synth
     default_channel: 1
 
-  ttySC1:
+  ttyAMA2:
     name: "Volca 1"
+    gpio: 4
     direction: out
     type: synth
     default_channel: 4
 
-  ttySC2:
+  ttyAMA3:
     name: "Volca 2"
+    gpio: 8
     direction: out
     type: synth
     default_channel: 5
 
-  ttySC3:
+  ttyAMA4:
     name: "Volca 3"
+    gpio: 12
     direction: out
     type: synth
     default_channel: 6
-
-  ttyAMA0:
-    name: "Spare DIN 1"
-    direction: both
-    type: unknown
-    default_channel: 0
