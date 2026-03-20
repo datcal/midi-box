@@ -10,8 +10,11 @@ Required /boot/firmware/config.txt overlays:
     dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA4
 """
 
-import threading
+import array
+import fcntl
 import logging
+import termios
+import threading
 import time
 from pathlib import Path
 
@@ -21,6 +24,23 @@ import mido
 logger = logging.getLogger("midi-box.hw")
 
 MIDI_BAUD = 31250
+
+# Linux ioctl constants for setting non-standard baud rates.
+# The standard termios API only supports pre-defined speeds; MIDI's 31250
+# baud requires the BOTHER flag via the termios2 (TCGETS2/TCSETS2) interface.
+_BOTHER = 0o010000
+_TCGETS2 = 0x802C542A
+_TCSETS2 = 0x402C542B
+
+
+def _set_custom_baudrate(fd: int, baudrate: int):
+    """Set a non-standard baud rate on a serial port using TCSETS2 ioctl."""
+    buf = array.array("i", [0] * 64)
+    fcntl.ioctl(fd, _TCGETS2, buf)
+    buf[2] = (buf[2] & ~termios.CBAUD) | _BOTHER  # cflag
+    buf[9] = baudrate   # ispeed
+    buf[10] = baudrate  # ospeed
+    fcntl.ioctl(fd, _TCSETS2, buf)
 
 
 class HardwareMidiPort:
@@ -43,6 +63,10 @@ class HardwareMidiPort:
                 stopbits=serial.STOPBITS_ONE,
                 timeout=0,  # Non-blocking reads
             )
+            # pyserial's standard termios path silently fails to set the
+            # non-standard 31250 baud on Pi's PL011 UART.  Force it via
+            # the TCSETS2 ioctl which supports arbitrary baud rates.
+            _set_custom_baudrate(self.serial.fd, MIDI_BAUD)
             logger.info(f"Opened hardware MIDI port: {self.name} ({self.device_path})")
             return True
         except serial.SerialException as e:
@@ -123,7 +147,7 @@ class HardwareMidi:
             direction = cfg.get("direction", "out")
 
             if not Path(device_path).exists():
-                logger.debug(f"Hardware port not found: {device_path}")
+                logger.warning(f"Hardware port not found: {device_path} — check dtoverlay and serial console config")
                 continue
 
             port = HardwareMidiPort(device_path, name, direction)

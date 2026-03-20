@@ -274,13 +274,16 @@ BOOT_CONFIG="/boot/firmware/config.txt"
 if ! grep -q "disable-bt" "$BOOT_CONFIG"; then
     cat >> "$BOOT_CONFIG" << 'EOF'
 
-# MIDI Box — UART overlays for 4x hardware MIDI OUT ports (replaces SC16IS752)
-dtoverlay=disable-bt    # frees UART0 (GPIO 14) from Bluetooth → MS-20 Mini
-dtoverlay=uart3         # GPIO 4  → /dev/ttyAMA2 → Volca #1
-dtoverlay=uart4         # GPIO 8  → /dev/ttyAMA3 → Volca #2
-dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA4 → Volca #3
-
-# Raspberry Pi 7" Official Touchscreen (DSI, auto-detected — no extra config needed)
+# MIDI Box — UART overlays for 4x hardware MIDI OUT ports
+# GPIO 14 → UART0 → /dev/ttyAMA0 (disable-bt frees it from Bluetooth)
+# GPIO 4  → UART3 → /dev/ttyAMA2
+# GPIO 8  → UART4 → /dev/ttyAMA3
+# GPIO 12 → UART5 → /dev/ttyAMA4
+# IMPORTANT: no inline comments on dtoverlay lines — firmware parser breaks
+dtoverlay=disable-bt
+dtoverlay=uart3
+dtoverlay=uart4
+dtoverlay=uart5
 EOF
     log "UART overlays added to $BOOT_CONFIG"
 else
@@ -289,6 +292,21 @@ fi
 
 # Disable Bluetooth service (UART0 is now used for MIDI)
 systemctl disable bluetooth 2>/dev/null && log "Bluetooth disabled (UART0 reserved for MIDI)" || true
+
+# Free UART0 from the kernel serial console — without this, the console grabs
+# /dev/ttyAMA0 and blocks MIDI use even after dtoverlay=disable-bt is applied.
+CMDLINE="/boot/firmware/cmdline.txt"
+[[ -f "$CMDLINE" ]] || CMDLINE="/boot/cmdline.txt"
+if grep -q 'console=serial0' "$CMDLINE"; then
+    sed -i 's/console=serial0,[0-9]* //' "$CMDLINE"
+    log "Removed serial console from $CMDLINE (UART0 reserved for MIDI)"
+else
+    log "No serial console on UART0 in $CMDLINE — OK"
+fi
+
+# Disable the serial getty so it doesn't reattach to ttyAMA0 on boot
+systemctl disable serial-getty@ttyAMA0.service 2>/dev/null \
+    && log "Disabled serial-getty on ttyAMA0" || true
 
 # Allow any user to start X — needed because the default Xwrapper "console" check
 # relies on systemd-logind seat assignment, which can fail when the kernel console
