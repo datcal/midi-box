@@ -87,7 +87,7 @@ class MidiPlayer:
             "paused": self._paused,
             "loop": self._loop,
             "tempo_factor": self._tempo_factor,
-            "bpm": round(self._tempo_factor * 120.0),
+            "bpm": round(self._tempo_factor * (self._clock_manager.bpm if self._clock_manager else 120.0)),
             "file": self._current_file,
             "folder": self._current_folder,
             "destination": self._destination,
