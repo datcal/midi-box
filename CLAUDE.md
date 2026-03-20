@@ -200,15 +200,18 @@ REST API base: `http://<pi-ip>:8080/api/...`
         │
         ├──→ Raspberry Pi 4 (GPIO 5V pins — USB-C kept free for DAW mode)
         ├──→ Waveshare USB Hub #1 (5V, 4× USB 2.0, 3 MIDI devices)
-        └──→ Waveshare USB Hub #2 (5V, 4× USB 2.0, 3 MIDI devices)
+        ├──→ Waveshare USB Hub #2 (5V, 4× USB 2.0, 3 MIDI devices)
+        ├──→ Cooling Fan #1 (5V, always-on)
+        └──→ Cooling Fan #2 (5V, always-on)
 ```
 
 | Component | 5V current draw |
 |---|---|
 | Pi 4 + 5" touchscreen | ~2.0A |
 | 2× Waveshare hubs + 6 USB MIDI devices | ~1.2A |
-| MIDI OUT board (LEDs, 8× 220Ω resistors) | ~0.1A |
-| **Realistic total** | **~3.3A** (5A capacity = comfortable headroom) |
+| MIDI OUT board (8× 220Ω resistors) | ~0.05A |
+| 2× Cooling fans | ~0.4A |
+| **Realistic total** | **~3.6A** (5A capacity = comfortable headroom) |
 
 - Box is closed — only DIN-5 MIDI ports and USB-A ports visible externally
 - 5" DSI touchscreen mounted on box face — shows QR codes + routing UI (Chromium kiosk)

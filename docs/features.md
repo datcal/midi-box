@@ -37,3 +37,4 @@
 - CV/Gate output for Eurorack (would need DAC or PWM + filter)
 - Multiple sync out jacks (independent rates per jack)
 - DIN sync (older Roland/Korg standard) via same 3.5mm jacks
+- PWM fan speed control via GPIO 18/13 + MOSFET (fans currently always-on; could ramp speed based on CPU temp)

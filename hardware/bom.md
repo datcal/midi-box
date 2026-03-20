@@ -25,13 +25,16 @@
 | 5-Pin DIN Female Connector (PCB mount) | 4 | MIDI OUT ports | One per device (MS-20, Volca ×3) |
 | 220 ohm Resistor (1/4W) | 8 | MIDI OUT current drive | 2 per port (active-drive circuit) |
 
+## Cooling
+
+| Component | Qty | Purpose | Notes |
+|-----------|-----|---------|-------|
+| MakerHawk Raspberry Pi DC Brushless Fan (2-pack) | 1 | Enclosure cooling | 5V always-on, wired directly to 5V rail + GND |
+
 ## User Interface Components
 
 | Component | Qty | Purpose | Notes |
 |-----------|-----|---------|-------|
-| LED (green, 3mm) | 10 | MIDI activity indicators | One per port |
-| LED (blue, 3mm) | 2 | Mode indicator (Standalone/DAW) | |
-| 330 ohm Resistor (1/4W) | 12 | LED current limiting | |
 | SPDT Toggle Switch | 1 | Manual mode override | Panel mount |
 
 ## Enclosure & Assembly
@@ -107,8 +110,8 @@ Single **5V 5A barrel jack** powers everything directly — no buck converter. P
 | Pi 4 + 5" touchscreen | ~2.0A | Pi ~1.7A + screen ~0.3A |
 | Waveshare Hub #1 (3 USB MIDI devices) | ~0.6A | MIDI devices ~150–200mA each |
 | Waveshare Hub #2 (3 USB MIDI devices) | ~0.6A | MIDI devices ~150–200mA each |
-| LEDs ×12 | ~0.12A | 10mA each |
-| **Realistic total** | **~3.3A** | |
-| **Supply capacity** | **5.0A** | ~1.7A headroom |
+| 2× Cooling fans | ~0.4A | ~0.2A each |
+| **Realistic total** | **~3.6A** | |
+| **Supply capacity** | **5.0A** | ~1.4A headroom |
 
 > The Waveshare hubs draw their own power from the 5V rail. No charging ports, no idle load — purely USB MIDI instrument connections.

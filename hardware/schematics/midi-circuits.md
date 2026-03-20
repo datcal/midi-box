@@ -116,3 +116,16 @@ Device nodes (pyserial):
 
 No 3.3V regulator needed — the Pi GPIO TX pins are the only 3.3V logic, and they connect directly.
 No optocouplers, no crystal oscillators, no I2C UART bridge chips.
+
+---
+
+## Cooling Fans
+
+2× MakerHawk 5V DC brushless fans wired directly to the 5V rail — always-on, no GPIO control needed.
+
+```
+    +5V Rail ──→ Fan + (red wire)
+    GND Rail ──→ Fan - (black wire)
+```
+
+No MOSFETs, no GPIO pins used. Fans run whenever the box is powered.
