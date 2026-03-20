@@ -5,7 +5,7 @@
 #
 # Run ONCE on a fresh Raspberry Pi after first boot:
 #
-#   git clone <your-repo> ~/midi-box
+#   git clone https://github.com/datcal/midi-box ~/midi-box
 #   cd ~/midi-box
 #   sudo bash scripts/pi_setup.sh
 #
@@ -171,7 +171,7 @@ SERVICE_FILE="/etc/systemd/system/midi-box.service"
 cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=MIDI Box Router
-Documentation=https://github.com/your-org/midi-box
+Documentation=https://github.com/datcal/midi-box
 After=network.target sound.target
 Wants=network.target
 
@@ -183,6 +183,9 @@ ExecStart=$VENV_DIR/bin/python src/main.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+LimitRTPRIO=70
+LimitMEMLOCK=infinity
+LimitNICE=-20
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=midi-box
