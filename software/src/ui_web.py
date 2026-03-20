@@ -271,6 +271,8 @@ def create_app(bridge):
     @app.route("/api/routes", methods=["POST"])
     def api_routes_add():
         data = request.json
+        if not data or "from" not in data or "to" not in data:
+            return jsonify({"ok": False, "error": "missing 'from' and 'to' fields"}), 400
         result = _cmd("route.add", {
             "from": data["from"],
             "to": data["to"],
@@ -282,6 +284,8 @@ def create_app(bridge):
     @app.route("/api/routes", methods=["DELETE"])
     def api_routes_remove():
         data = request.json
+        if not data or "from" not in data or "to" not in data:
+            return jsonify({"ok": False, "error": "missing 'from' and 'to' fields"}), 400
         result = _cmd("route.remove", {"from": data["from"], "to": data["to"]})
         return jsonify({"ok": result.get("ok", False)})
 
@@ -293,6 +297,8 @@ def create_app(bridge):
     @app.route("/api/routes/toggle", methods=["POST"])
     def api_routes_toggle():
         data = request.json
+        if not data or "from" not in data or "to" not in data:
+            return jsonify({"ok": False, "error": "missing 'from' and 'to' fields"}), 400
         result = _cmd("route.toggle", {"from": data["from"], "to": data["to"]})
         if not result.get("ok"):
             return jsonify({"ok": False}), 404

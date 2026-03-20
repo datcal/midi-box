@@ -70,7 +70,7 @@ class ClipLauncher:
     def __init__(self, clock_manager=None):
         self.layers: list[Layer] = []
         self._send_callback = None  # fn(destination, mido.Message)
-        self._output_devices_callback = None  # fn() -> list[str], for clock output
+        self._file_cache = None    # cached list_files() result
 
         # Reference to the shared ClockManager (injected from main.py)
         self._clock_manager = clock_manager
@@ -160,11 +160,7 @@ class ClipLauncher:
             if not self._transport_running:
                 return
 
-            # Emit MIDI clock (0xF8) to all output devices every 4 internal ticks
-            # when running in internal mode (ClockManager owns the timing source)
-            cm_source = self._clock_manager.source if self._clock_manager else "internal"
-            if cm_source == "internal" and tick % CLOCK_EMIT_INTERVAL == 0:
-                self._emit_midi_clock()
+            # ClockManager handles MIDI clock broadcast — don't duplicate here
 
             # Check quantum boundary for queued launches
             if self._is_quantum_boundary():
@@ -190,16 +186,6 @@ class ClipLauncher:
             return t % (tpbar * 4) == 0
         return False
 
-    def _emit_midi_clock(self):
-        """Send 0xF8 to all output devices."""
-        if not self._send_callback or not self._output_devices_callback:
-            return
-        clock_msg = mido.Message("clock")
-        for dest in self._output_devices_callback():
-            try:
-                self._send_callback(dest, clock_msg)
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Quantized launch / stop
@@ -372,6 +358,18 @@ class ClipLauncher:
         if not clip.events:
             return
 
+        # End of clip: loop or stop (checked before processing so tick-0 events play on loop)
+        if clip.play_head >= clip.total_ticks:
+            if clip.loop:
+                clip.play_head = 0
+                clip.event_cursor = 0
+                # Fall through to process tick-0 events
+            else:
+                self._stop_clip_clean(layer)
+                clip.state = ClipState.STOPPED
+                layer.active_clip = None
+                return
+
         # Send all events at current play_head
         while clip.event_cursor < len(clip.events):
             ev_tick, msg = clip.events[clip.event_cursor]
@@ -379,17 +377,6 @@ class ClipLauncher:
                 break
             self._send_clip_event(layer, msg)
             clip.event_cursor += 1
-
-        # End of clip: check before advancing so there is no extra tick of silence
-        if clip.play_head >= clip.total_ticks:
-            if clip.loop:
-                clip.play_head = 0
-                clip.event_cursor = 0
-            else:
-                self._stop_clip_clean(layer)
-                clip.state = ClipState.STOPPED
-                layer.active_clip = None
-            return
 
         clip.play_head += 1
 
@@ -569,7 +556,9 @@ class ClipLauncher:
     # ------------------------------------------------------------------
 
     def list_files(self) -> list[dict]:
-        """List available MIDI files."""
+        """List available MIDI files (cached — call invalidate_file_cache on changes)."""
+        if self._file_cache is not None:
+            return self._file_cache
         files = []
         for f in sorted(MIDI_FILES_DIR.glob("*.mid")):
             try:
@@ -581,7 +570,12 @@ class ClipLauncher:
                 })
             except Exception:
                 files.append({"name": f.name, "duration": 0, "tracks": 0})
+        self._file_cache = files
         return files
+
+    def invalidate_file_cache(self):
+        """Mark file cache as stale — next list_files() will re-scan disk."""
+        self._file_cache = None
 
     def upload(self, filename: str, data: bytes) -> bool:
         """Save an uploaded MIDI file."""
@@ -592,6 +586,7 @@ class ClipLauncher:
             return False
         try:
             (MIDI_FILES_DIR / safe_name).write_bytes(data)
+            self.invalidate_file_cache()
             logger.info(f"MIDI file uploaded: {safe_name}")
             return True
         except Exception as e:

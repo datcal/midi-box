@@ -62,6 +62,7 @@ class MidiPlayer:
         self._thread: threading.Thread | None = None
         self._running = False
         self._paused = False
+        self._stop_event = threading.Event()
         self._loop = False
         self._tempo_factor = 1.0
         self._current_file: str | None = None
@@ -70,6 +71,7 @@ class MidiPlayer:
         self._position = 0.0  # seconds elapsed
         self._duration = 0.0
         self._lock = threading.Lock()
+        self._file_cache: dict | None = None  # cached list_files() result
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -86,8 +88,8 @@ class MidiPlayer:
             "playing": self._running and not self._paused,
             "paused": self._paused,
             "loop": self._loop,
-            "tempo_factor": self._tempo_factor,
-            "bpm": round(self._tempo_factor * (self._clock_manager.bpm if self._clock_manager else 120.0)),
+            "tempo_factor": (self._clock_manager.bpm / 120.0) if self._clock_manager else 1.0,
+            "bpm": self._clock_manager.bpm if self._clock_manager else 120.0,
             "file": self._current_file,
             "folder": self._current_folder,
             "destination": self._destination,
@@ -99,13 +101,20 @@ class MidiPlayer:
     # File listing
     # ------------------------------------------------------------------
 
+    def invalidate_file_cache(self):
+        """Mark file cache as stale — next list_files() will re-scan disk."""
+        self._file_cache = None
+
     def list_files(self, folder: str | None = None) -> dict:
         """
         List MIDI files (and folders at root level).
+        Cached — call invalidate_file_cache() on upload/delete/rename.
 
         folder=None  → returns root-level files + all subfolder names/counts.
         folder="x"   → returns files inside UPLOAD_DIR/x only.
         """
+        if folder is None and self._file_cache is not None:
+            return self._file_cache
         if folder is None:
             # Root level
             folders = []
@@ -114,7 +123,9 @@ class MidiPlayer:
                     count = len(list(d.glob("*.mid")))
                     folders.append({"name": d.name, "file_count": count})
             files = [_file_meta(f, None) for f in sorted(UPLOAD_DIR.glob("*.mid"))]
-            return {"folders": folders, "files": files}
+            result = {"folders": folders, "files": files}
+            self._file_cache = result
+            return result
         else:
             target = _resolve_dir(folder)
             if target is None or not target.is_dir():
@@ -146,6 +157,7 @@ class MidiPlayer:
         try:
             path = target_dir / safe_name
             path.write_bytes(data)
+            self.invalidate_file_cache()
             logger.info("MIDI file uploaded: %s (folder=%s)", safe_name, folder)
             return {"ok": True, "filename": safe_name}
         except Exception as e:
@@ -170,6 +182,7 @@ class MidiPlayer:
         if self._current_file == filename and self._current_folder == folder:
             self.stop()
         path.unlink()
+        self.invalidate_file_cache()
         logger.info("MIDI file deleted: %s (folder=%s)", filename, folder)
         return True
 
@@ -196,6 +209,7 @@ class MidiPlayer:
             return {"ok": False, "error": "A file with that name already exists"}
 
         old_path.rename(new_path)
+        self.invalidate_file_cache()
         # Update current file reference if needed
         if self._current_file == old_name and self._current_folder == folder:
             self._current_file = safe_new
@@ -243,6 +257,7 @@ class MidiPlayer:
             self.stop()
 
         old_path.rename(new_path)
+        self.invalidate_file_cache()
         logger.info("Folder renamed: %s → %s", old_name, safe_new)
         return {"ok": True}
 
@@ -260,6 +275,7 @@ class MidiPlayer:
             for f in target.glob("*.mid"):
                 f.unlink()
             target.rmdir()
+            self.invalidate_file_cache()
             logger.info("Folder deleted: %s", name)
             return {"ok": True}
         except Exception as e:
@@ -287,6 +303,7 @@ class MidiPlayer:
             return {"ok": False, "error": "A file with that name already exists in the destination"}
 
         src_path.rename(dst_path)
+        self.invalidate_file_cache()
 
         # Update current file reference if needed
         if self._current_file == filename and self._current_folder == src_folder:
@@ -331,6 +348,7 @@ class MidiPlayer:
 
         self._running = True
         self._paused = False
+        self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._play_loop, args=(str(path),), daemon=True
         )
@@ -343,6 +361,8 @@ class MidiPlayer:
         """Stop playback."""
         self._running = False
         self._paused = False
+        self._tempo_factor = 1.0
+        self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
             self._thread = None
@@ -393,14 +413,19 @@ class MidiPlayer:
 
                     # Handle pause
                     while self._paused and self._running:
-                        time.sleep(0.05)
+                        if self._stop_event.wait(0.05):
+                            return
 
                     if not self._running:
                         return
 
-                    # Wait with tempo adjustment
+                    # Wait with tempo adjustment (interruptible)
+                    # Derive tempo factor from global clock BPM (120 = normal speed)
                     if msg.time > 0:
-                        time.sleep(msg.time / self._tempo_factor)
+                        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
+                        delay = msg.time / (bpm / 120.0)
+                        if self._stop_event.wait(delay):
+                            return
 
                     self._position = time.time() - start_time
 

@@ -66,7 +66,7 @@ class MidiFilter:
         if message.type in ("start", "stop", "continue"):
             if self.block_clock:  # Block transport with clock
                 return None
-            if self.message_types and "transport" not in self.message_types:
+            if self.message_types and "transport" not in self.message_types and message.type not in self.message_types:
                 return None
             return message
 

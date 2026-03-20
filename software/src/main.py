@@ -143,7 +143,6 @@ class MidiBox:
         self.looper._send_callback  = self._send_midi
         self.launcher._send_callback = self._send_midi
         self.recorder._router_callback = self.router.process_message
-        self.launcher._output_devices_callback = self._get_output_device_names
 
         # Wire ClockManager clock callback via router:
         # router calls this for clock/start/stop/continue from the designated source
@@ -1300,8 +1299,15 @@ class MidiBox:
     def _on_usb_device_disconnected(self, port_name: str):
         device = self.registry.find_by_port_id(port_name)
         if device:
-            self.registry.unregister_device(device.name)
-            logger.info(f"Hotplug: {device.name} disconnected")
+            dev_name = device.name
+            self.registry.unregister_device(dev_name)
+            logger.info(f"Hotplug: {dev_name} disconnected")
+            # If this was the clock source, fall back to internal
+            if self.clock_manager.source == dev_name:
+                logger.warning(f"Clock source '{dev_name}' disconnected — switching to internal")
+                self.clock_manager.set_source("internal")
+                self.router.set_clock_source(None)
+                self.state.set_clock({"bpm": self.clock_manager.bpm, "source": "internal"})
         else:
             self.registry.unregister_device(port_name)
             logger.info(f"Hotplug: {port_name} disconnected")

@@ -460,10 +460,10 @@
       <div class="card clock-bar" id="player-clock-bar">
         <div class="clock-controls">
           <div class="clock-bpm">
-            <button class="btn btn-sm" onclick="playerAdjustBpm(-1)">-</button>
-            <input type="number" id="player-bpm" value="120" min="20" max="300"
+            <button class="btn btn-sm" data-bpm-step onclick="playerAdjustBpm(-1)">-</button>
+            <input type="number" data-bpm-sync id="player-bpm" value="120" min="20" max="300"
                    style="width:60px; text-align:center;" onchange="playerSetBpm(this.value)">
-            <button class="btn btn-sm" onclick="playerAdjustBpm(1)">+</button>
+            <button class="btn btn-sm" data-bpm-step onclick="playerAdjustBpm(1)">+</button>
             <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">BPM</span>
           </div>
           <div class="player-destination">

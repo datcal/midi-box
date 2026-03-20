@@ -252,9 +252,9 @@ class QuickRecorder:
 
     def _cancel_count_in(self) -> None:
         """Cancel an active count-in."""
-        self._count_in_event.set()  # unblock the worker
+        self._state = "idle"              # set state FIRST to prevent worker from starting
+        self._count_in_event.set()        # THEN unblock the worker
         self._unsubscribe_from_clock()
-        self._state = "idle"
         logger.info("Quick recorder: count-in cancelled")
 
     # ------------------------------------------------------------------
@@ -453,17 +453,21 @@ class QuickRecorder:
                 stop_ev.wait(remaining)
 
     def _to_midi_file(self, events: list) -> mido.MidiFile:
+        # Use actual BPM from ClockManager for correct tempo metadata
+        bpm = self._clock_manager.bpm if self._clock_manager else 120.0
+        tempo = int(60_000_000 / bpm)
+
         mid = mido.MidiFile(type=0, ticks_per_beat=TICKS_PER_BEAT)
         track = mido.MidiTrack()
         mid.tracks.append(track)
-        track.append(mido.MetaMessage("set_tempo", tempo=DEFAULT_TEMPO, time=0))
+        track.append(mido.MetaMessage("set_tempo", tempo=tempo, time=0))
 
         sorted_events = sorted(events, key=lambda e: e[0])
         prev_ticks = 0
         for offset_sec, _source, msg in sorted_events:
             if msg.type in _SKIP_TYPES:
                 continue
-            ticks = int(offset_sec * TICKS_PER_BEAT * 1_000_000 / DEFAULT_TEMPO)
+            ticks = int(offset_sec * TICKS_PER_BEAT * 1_000_000 / tempo)
             delta = max(0, ticks - prev_ticks)
             prev_ticks = ticks
             try:

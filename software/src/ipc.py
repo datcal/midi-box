@@ -78,15 +78,19 @@ class IpcBridge:
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if cmd_id in self.results:
-                result = dict(self.results[cmd_id])
-                del self.results[cmd_id]
+            try:
+                result = dict(self.results.pop(cmd_id))
                 return result
+            except KeyError:
+                pass
             time.sleep(0.005)
 
         logger.error(f"IPC command timeout: {action}")
         # Remove stale result if the engine writes it after we gave up
-        self.results.pop(cmd_id, None)
+        try:
+            self.results.pop(cmd_id)
+        except KeyError:
+            pass
         return {"ok": False, "error": "timeout"}
 
     def close(self):

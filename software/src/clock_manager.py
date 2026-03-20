@@ -110,8 +110,8 @@ class ClockManager:
             for cb in list(self._bpm_subs):
                 try:
                     cb(bpm)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("BPM subscriber %s error: %s", cb, e)
             logger.info(f"Clock BPM: {bpm}")
 
     def set_source(self, source: str) -> None:
@@ -344,8 +344,8 @@ class ClockManager:
         for sub in list(self._tick_subs):
             try:
                 sub(tick, beat, bar, True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Tick subscriber %s error: %s", sub, e)
 
     # ------------------------------------------------------------------
     # Watchdog

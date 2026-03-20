@@ -7,6 +7,7 @@ Supports filtering, channel remapping, merging, and splitting.
 import threading
 import time
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 import mido
@@ -62,7 +63,7 @@ class MidiRouter:
         self.routes: list[Route] = []
         self._lock = threading.Lock()
         self._send_callback = None  # Function to actually send MIDI
-        self._activity: dict[str, PortActivity] = {}
+        self._activity: dict[str, PortActivity] = defaultdict(PortActivity)
         self._clock_source: str | None = None
         self._clock_callback = None  # fn(mido.Message) for clip launcher
         self._running = False
@@ -104,7 +105,7 @@ class MidiRouter:
         )
         with self._lock:
             self.routes.append(route)
-        self._rebuild_index()
+            self._rebuild_index()
         logger.info(f"Route added: {route.name}")
         return route
 
@@ -117,8 +118,8 @@ class MidiRouter:
                 if not (r.source == source and r.destination == destination)
             ]
             removed = before - len(self.routes)
-        if removed:
-            self._rebuild_index()
+            if removed:
+                self._rebuild_index()
             logger.info(f"Removed {removed} route(s): {source} -> {destination}")
         return removed > 0
 
@@ -127,7 +128,7 @@ class MidiRouter:
         with self._lock:
             count = len(self.routes)
             self.routes.clear()
-        self._rebuild_index()
+            self._rebuild_index()
         logger.info(f"Cleared {count} routes")
 
     def process_message(self, source_name: str, message: mido.Message):
@@ -195,8 +196,6 @@ class MidiRouter:
 
     def _record_activity(self, port_name: str, msg_type: str, is_input: bool):
         key = f"{'in' if is_input else 'out'}:{port_name}"
-        if key not in self._activity:
-            self._activity[key] = PortActivity()
         self._activity[key].record(msg_type)
 
     def get_activity(self, port_name: str, is_input: bool = True) -> PortActivity:

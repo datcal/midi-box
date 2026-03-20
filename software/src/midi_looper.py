@@ -319,7 +319,7 @@ class MidiLooper:
             if had_content:
                 self._start_playback(slot)
             # Unsubscribe if no other slots need clock
-            if not any(s.state in ("count_in", "recording") for s in self.slots):
+            if not any(s.state in ("count_in", "recording", "overdubbing") for s in self.slots):
                 self._unsubscribe_from_clock()
 
         elif slot.state == "overdubbing":
