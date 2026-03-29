@@ -72,7 +72,7 @@ IPC (src/ipc.py)
 | `src/router.py` | Route table, routing logic, port activity tracking |
 | `src/midi_filter.py` | Per-route filtering (channel, message type, velocity, CC) |
 | `src/alsa_midi.py` | USB MIDI via ALSA/rtmidi, hotplug detection |
-| `src/hw_midi.py` | 5-Pin DIN MIDI OUT via Pi native UARTs (/dev/ttyAMA0,2,3,4) |
+| `src/hw_midi.py` | 5-Pin DIN MIDI OUT via Pi native UARTs (/dev/ttyAMA0,3,4,5) |
 | `src/gadget.py` | USB gadget config (Pi as MIDI device to Mac) |
 | `src/device_registry.py` | USB ID → friendly name mapping, direction/channel overrides |
 | `src/preset_manager.py` | Load/save routing presets from JSON |
@@ -97,9 +97,9 @@ IPC (src/ipc.py)
 
 **5-Pin DIN (4 devices, MIDI OUT only, Pi native UARTs):**
 - Korg MS-20 Mini (/dev/ttyAMA0, GPIO 14)
-- Korg Volca #1   (/dev/ttyAMA2, GPIO 4)
-- Korg Volca #2   (/dev/ttyAMA3, GPIO 8)
-- Korg Volca #3   (/dev/ttyAMA4, GPIO 12)
+- Korg Volca #1   (/dev/ttyAMA3, GPIO 4)
+- Korg Volca #2   (/dev/ttyAMA4, GPIO 8)
+- Korg Volca #3   (/dev/ttyAMA5, GPIO 12)
 
 ## Route / Preset Format
 

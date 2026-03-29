@@ -64,33 +64,33 @@ usb_devices:
 #
 # GPIO → UART → Device mapping:
 #   GPIO 14 → UART0 → /dev/ttyAMA0  (dtoverlay=disable-bt)
-#   GPIO 4  → UART3 → /dev/ttyAMA5  (dtoverlay=uart3)
-#   GPIO 8  → UART4 → /dev/ttyAMA3  (dtoverlay=uart4)
-#   GPIO 12 → UART5 → /dev/ttyAMA4  (dtoverlay=uart5)
+#   GPIO 4  → UART3 → /dev/ttyAMA3  (dtoverlay=uart3)
+#   GPIO 8  → UART4 → /dev/ttyAMA4  (dtoverlay=uart4)
+#   GPIO 12 → UART5 → /dev/ttyAMA5  (dtoverlay=uart5)
 hardware_ports:
   ttyAMA0:
-    name: "MIDI OUT 1"
+    name: "MIDI OUT 2"
     gpio: 14
     direction: out
     type: synth
     default_channel: 1
 
-  ttyAMA5:
-    name: "MIDI OUT 2"
+  ttyAMA3:
+    name: "MIDI OUT 1"
     gpio: 4
     direction: out
     type: synth
     default_channel: 2
 
-  ttyAMA3:
-    name: "MIDI OUT 3"
+  ttyAMA4:
+    name: "MIDI OUT 4"
     gpio: 8
     direction: out
     type: synth
     default_channel: 3
 
-  ttyAMA4:
-    name: "MIDI OUT 4"
+  ttyAMA5:
+    name: "MIDI OUT 3"
     gpio: 12
     direction: out
     type: synth
