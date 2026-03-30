@@ -18,11 +18,26 @@ import signal
 from typing import Optional
 import time
 import logging
+import logging.handlers
 import argparse
 import threading
 import multiprocessing
 
 import mido
+
+# --- Targeted diagnostic logger (writes to data/midi_debug.log) ---
+# Only captures transport send results and per-device send timing.
+_diag_logger = logging.getLogger("midi-box.diag")
+_diag_logger.setLevel(logging.DEBUG)
+_diag_logger.propagate = False  # don't pollute console
+_DIAG_LOG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "midi_debug.log"
+)
+_diag_handler = logging.handlers.RotatingFileHandler(
+    _DIAG_LOG_PATH, maxBytes=512_000, backupCount=1,  # ~500 KB cap
+)
+_diag_handler.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%H:%M:%S"))
+_diag_logger.addHandler(_diag_handler)
 
 # Message types that must never appear in the MIDI monitor ring buffer.
 # Clock (0xF8) fires 24 times per beat — logging it would flood the 500-entry
@@ -622,11 +637,15 @@ class MidiBox:
         # --- Devices ---
         elif action == "device.config":
             name = params["name"]
+            block_transport = params.get("block_transport")
+            if isinstance(block_transport, str):
+                block_transport = block_transport.lower() in ("true", "1", "yes")
             ok = self.registry.update_device_config(
                 name,
                 direction=params.get("direction"),
                 device_type=params.get("device_type"),
                 midi_channel=params.get("midi_channel"),
+                block_transport=block_transport if isinstance(block_transport, bool) else None,
             )
             if not ok:
                 return {"ok": False, "error": "Device not found"}
@@ -644,7 +663,10 @@ class MidiBox:
                 "device_type": dev.device_type,
                 "midi_channel": dev.midi_channel,
                 "port_id": port_id,
+                "block_transport": dev.block_transport,
             })
+            # Refresh clock output cache (block_transport may have changed)
+            self._refresh_clock_outputs()
             self.registry.set_device_overrides(self.state.get_device_overrides())
             # Save display name if provided
             display_name = params.get("display_name", "").strip()
@@ -1059,6 +1081,7 @@ class MidiBox:
                 "port_id": dev.port_id,
                 "midi_channel": dev.midi_channel,
                 "connected": dev.connected,
+                "block_transport": dev.block_transport,
                 "activity_in": a_in.is_active,
                 "activity_out": a_out.is_active,
                 "msg_count_in": a_in.message_count,
@@ -1225,9 +1248,16 @@ class MidiBox:
 
         ok = False
         if device.port_type == "usb":
+            t0 = time.monotonic()
             ok = self.alsa.send(device.port_id, message)
+            dt = (time.monotonic() - t0) * 1000
+            if message.type in ("note_on", "note_off") and dt > 1.0:
+                _diag_logger.debug("SLOW SEND %.1fms  %s → %s  %s", dt, destination, message.type, message)
         elif device.port_type == "hardware" and self.hw:
             ok = self.hw.send(device.name, message)
+
+        if not ok and message.type not in _TRANSPORT_TYPES:
+            _diag_logger.debug("SEND FAIL  %s → %s  %s", destination, message.type, message)
 
         if ok and not self._performance_mode and message.type not in _TRANSPORT_TYPES:
             self.midi_logger.log_output(destination, message)
@@ -1245,7 +1275,10 @@ class MidiBox:
 
     def _refresh_clock_outputs(self) -> None:
         """Rebuild the cached output device name list. Called at startup and on hotplug."""
-        self._clock_output_names = [d.name for d in self.registry.get_output_devices()]
+        self._clock_output_names = [
+            d.name for d in self.registry.get_output_devices()
+            if not d.block_transport
+        ]
 
     def _send_transport_to_outputs(self, message) -> None:
         """Broadcast a start/stop/continue message to all output devices."""
@@ -1253,7 +1286,11 @@ class MidiBox:
         for dev in self.registry.get_output_devices():
             if dev.name == clock_source:
                 continue
-            self._send_midi(dev.name, message)
+            if dev.block_transport:
+                _diag_logger.debug("TRANSPORT %s → %s  BLOCKED (block_transport)", message.type, dev.name)
+                continue
+            ok = self._send_midi(dev.name, message)
+            _diag_logger.debug("TRANSPORT %s → %s  ok=%s", message.type, dev.name, ok)
 
     def _send_panic(self):
         """Send All Sound Off (CC 120) + All Notes Off (CC 123) on all 16 channels

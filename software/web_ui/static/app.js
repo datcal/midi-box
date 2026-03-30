@@ -234,6 +234,7 @@ async function loadRouting() {
   ]);
   devices = devData.devices;
   routes = routeData.routes;
+  window._deviceDisplayNames = devData.device_display_names || {};
 
   renderPatchbay();
   renderRouteList();
@@ -248,6 +249,7 @@ function setRoutingMode(mode) {
 }
 
 function renderPatchbay() {
+  const displayNames = window._deviceDisplayNames || {};
   let sources, dests;
 
   if (routingMode === 'perform') {
@@ -299,7 +301,7 @@ function renderPatchbay() {
              class="pb-box ${isSelected ? 'pb-box-selected' : routeCount > 0 ? 'pb-box-active' : ''}"
              onclick="selectSource('${esc(d.name)}')">
           <div class="pb-box-label">${isSelected ? 'SELECTED' : 'SOURCE'}</div>
-          <div class="pb-box-name">${esc(d.name)}</div>
+          <div class="pb-box-name">${esc(displayNames[d.name] || d.name)}</div>
           <div class="pb-box-meta">${chLabel} &middot; ${esc(d.device_type)}</div>
           ${routeCount > 0
             ? `<div class="pb-box-count">${routeCount} route${routeCount !== 1 ? 's' : ''}</div>`
@@ -333,7 +335,7 @@ function renderPatchbay() {
       return `
         <div id="dst_${deviceId(d.name)}" class="${cls}" ${onclick}>
           <div class="pb-box-label">${isConnected ? '&#10003; CONNECTED' : 'DEST'}</div>
-          <div class="pb-box-name">${esc(d.name)}</div>
+          <div class="pb-box-name">${esc(displayNames[d.name] || d.name)}</div>
           <div class="pb-box-meta">${chLabel} &middot; ${esc(d.device_type)}</div>
           ${isConnected && selectedSource
             ? `<button class="btn btn-sm" style="margin-top:10px;"
@@ -348,7 +350,7 @@ function renderPatchbay() {
   const hint = document.getElementById('routing-hint');
   if (selectedSource) {
     const exNote = exclusive ? ' — exclusive (replaces current)' : '';
-    hint.textContent = `${selectedSource} selected${exNote} — tap a destination`;
+    hint.textContent = `${displayNames[selectedSource] || selectedSource} selected${exNote} — tap a destination`;
     hint.style.color = 'var(--accent)';
   } else {
     hint.textContent = routingMode === 'perform'
@@ -446,6 +448,7 @@ async function toggleRoutePatchbay(to, isConnected) {
 
 function renderRouteList() {
   const list = document.getElementById('route-list');
+  const displayNames = window._deviceDisplayNames || {};
   if (routes.length === 0) {
     list.innerHTML = '<li class="route-item" style="color:var(--text-muted);">No routes configured</li>';
     return;
@@ -457,9 +460,9 @@ function renderRouteList() {
       <li class="route-item ${r.enabled === false ? 'disabled' : ''}">
         <div>
           <span class="route-path">
-            <strong>${esc(r.from)}</strong>
+            <strong>${esc(displayNames[r.from] || r.from)}</strong>
             <span class="route-arrow">&rarr;</span>
-            <strong>${esc(r.to)}</strong>
+            <strong>${esc(displayNames[r.to] || r.to)}</strong>
           </span>
           ${filterDesc ? `<span class="route-filter">${esc(filterDesc)}</span>` : ''}
         </div>
@@ -1708,6 +1711,7 @@ function openDeviceModal(name) {
   document.getElementById('device-direction').value = dev.direction || 'both';
   document.getElementById('device-type').value = dev.device_type || 'unknown';
   document.getElementById('device-channel').value = dev.midi_channel || 0;
+  document.getElementById('device-block-transport').checked = !!dev.block_transport;
 
   // Port selector — only for USB devices
   const portRow = document.getElementById('device-port-row');
@@ -1745,6 +1749,7 @@ async function applyDeviceConfig() {
   const device_type = document.getElementById('device-type').value;
   const midi_channel = parseInt(document.getElementById('device-channel').value) || 0;
   const display_name = document.getElementById('device-display-name').value.trim();
+  const block_transport = document.getElementById('device-block-transport').checked;
   const dev = devices.find(d => d.name === pendingDeviceName);
   const port_id = (dev?.port_type === 'usb')
     ? document.getElementById('device-port-select').value
@@ -1752,7 +1757,7 @@ async function applyDeviceConfig() {
 
   await api(`/devices/${encodeURIComponent(pendingDeviceName)}/config`, {
     method: 'POST',
-    body: { direction, device_type, midi_channel, display_name, port_id },
+    body: { direction, device_type, midi_channel, display_name, port_id, block_transport },
   });
 
   closeDeviceModal();

@@ -22,6 +22,7 @@ class MidiDevice:
     port_id: str = ""  # ALSA port string or serial device path
     midi_channel: int = 0  # 0 = all channels
     connected: bool = False
+    block_transport: bool = False  # block start/stop/clock broadcast to this device
 
 
 class DeviceRegistry:
@@ -131,6 +132,7 @@ class DeviceRegistry:
             port_id=port_id,
             midi_channel=overrides.get("midi_channel", device_info.get("default_channel", 0)),
             connected=True,
+            block_transport=overrides.get("block_transport", False),
         )
         self.active_devices[friendly_name] = device
         logger.info(f"Registered USB device: {friendly_name} (port: {port_id})")
@@ -151,6 +153,7 @@ class DeviceRegistry:
                 port_id=serial_port,
                 midi_channel=overrides.get("midi_channel", info.get("default_channel", 0)),
                 connected=True,
+                block_transport=overrides.get("block_transport", False),
             )
             self.active_devices[name] = device
             logger.info(f"Registered hardware device: {name} on {serial_port}")
@@ -160,7 +163,8 @@ class DeviceRegistry:
             return None
 
     def update_device_config(self, name: str, direction: str = None,
-                              device_type: str = None, midi_channel: int = None) -> bool:
+                              device_type: str = None, midi_channel: int = None,
+                              block_transport: bool = None) -> bool:
         """Update device configuration (called from UI)."""
         dev = self.active_devices.get(name)
         if not dev:
@@ -171,6 +175,8 @@ class DeviceRegistry:
             dev.device_type = device_type
         if midi_channel is not None:
             dev.midi_channel = midi_channel
+        if block_transport is not None:
+            dev.block_transport = block_transport
         logger.info(f"Updated device config: {name} -> dir={dev.direction}, type={dev.device_type}")
         return True
 

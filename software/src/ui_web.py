@@ -255,6 +255,7 @@ def create_app(bridge):
             "midi_channel": data.get("midi_channel"),
             "display_name": data.get("display_name", ""),
             "port_id": data.get("port_id", ""),
+            "block_transport": data.get("block_transport"),
         })
         if not result.get("ok"):
             return jsonify({"ok": False, "error": result.get("error", "Device not found")}), 404
