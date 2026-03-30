@@ -731,30 +731,30 @@ body {
 .exclusive-label input { display: none; }
 
 .exclusive-switch {
-  width: 34px;
-  height: 19px;
-  background: var(--border);
-  border-radius: 10px;
+  width: 50px;
+  height: 28px;
+  background: #8b3a3a;
+  border-radius: 14px;
   position: relative;
-  transition: background 0.2s;
+  transition: background 0.25s;
   flex-shrink: 0;
 }
 
 .exclusive-switch::after {
   content: '';
-  width: 13px;
-  height: 13px;
+  width: 22px;
+  height: 22px;
   background: #fff;
   border-radius: 50%;
   position: absolute;
   top: 3px;
   left: 3px;
-  transition: left 0.2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  transition: left 0.25s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
 
 .exclusive-label input:checked ~ .exclusive-switch { background: var(--accent); }
-.exclusive-label input:checked ~ .exclusive-switch::after { left: 18px; }
+.exclusive-label input:checked ~ .exclusive-switch::after { left: 25px; }
 .exclusive-label input:checked ~ span:last-child { color: var(--accent); font-weight: 600; }
 
 /* --- Patchbay canvas --- */
@@ -1804,6 +1804,33 @@ body {
   color: var(--text-primary);
   font-family: inherit;
   font-size: 13px;
+}
+
+.modal .form-row.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal .form-row.toggle-row input {
+  width: auto;
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.modal .form-row.toggle-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.modal .form-row.toggle-card > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .modal .form-actions {

@@ -1711,7 +1711,7 @@ function openDeviceModal(name) {
   document.getElementById('device-direction').value = dev.direction || 'both';
   document.getElementById('device-type').value = dev.device_type || 'unknown';
   document.getElementById('device-channel').value = dev.midi_channel || 0;
-  document.getElementById('device-block-transport').checked = !!dev.block_transport;
+  document.getElementById('device-block-transport-select').value = dev.block_transport ? 'on' : 'off';
 
   // Port selector — only for USB devices
   const portRow = document.getElementById('device-port-row');
@@ -1749,7 +1749,7 @@ async function applyDeviceConfig() {
   const device_type = document.getElementById('device-type').value;
   const midi_channel = parseInt(document.getElementById('device-channel').value) || 0;
   const display_name = document.getElementById('device-display-name').value.trim();
-  const block_transport = document.getElementById('device-block-transport').checked;
+  const block_transport = document.getElementById('device-block-transport-select').value === 'on';
   const dev = devices.find(d => d.name === pendingDeviceName);
   const port_id = (dev?.port_type === 'usb')
     ? document.getElementById('device-port-select').value

@@ -1233,6 +1233,10 @@ class MidiBox:
         if not device:
             return False
 
+        # Block transport messages (start/stop/continue/clock/songpos) if device has block_transport enabled
+        if device.block_transport and message.type in _TRANSPORT_TYPES:
+            return False
+
         # Apply device-level channel: if the device is configured for a specific
         # MIDI channel (1-16), remap all channel messages to that channel before
         # sending. 0 means "all channels" (no remapping). mido uses 0-indexed
