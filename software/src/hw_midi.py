@@ -4,10 +4,10 @@ All 4 DIN ports are MIDI OUT only. No SC16IS752 bridge chips needed.
 Communicates over serial at 31250 baud (MIDI standard).
 
 Required /boot/firmware/config.txt overlays:
-    dtoverlay=disable-bt    # frees UART0 (GPIO 14)
-    dtoverlay=uart3         # GPIO 4  → /dev/ttyAMA2
-    dtoverlay=uart4         # GPIO 8  → /dev/ttyAMA3
-    dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA4
+    dtoverlay=disable-bt    # frees UART0 (GPIO 14)  → /dev/ttyAMA0
+    dtoverlay=uart3         # GPIO 4  → /dev/ttyAMA3
+    dtoverlay=uart4         # GPIO 8  → /dev/ttyAMA4
+    dtoverlay=uart5         # GPIO 12 → /dev/ttyAMA5
 """
 
 import array
